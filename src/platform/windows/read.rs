@@ -17,53 +17,7 @@ use winreg::RegKey;
 use winreg::enums::{HKEY_LOCAL_MACHINE, KEY_READ, KEY_WOW64_64KEY};
 
 use crate::cidr::Cidr;
-
-#[derive(Clone, Debug)]
-pub struct IpEntry {
-    pub cidr: Cidr,
-    /// Adresse issue de DHCP (par opposition à une adresse manuelle).
-    pub from_dhcp: bool,
-}
-
-#[derive(Clone, Debug)]
-pub struct AdapterInfo {
-    pub name: String,
-    pub description: String,
-    pub mac: String,
-    pub guid: String,
-    pub if_index: u32,
-    pub is_up: bool,
-    pub dhcp: bool,
-    pub addresses: Vec<IpEntry>,
-    pub gateway: Option<Ipv4Addr>,
-    pub dns: Vec<Ipv4Addr>,
-}
-
-impl AdapterInfo {
-    /// Adresse « principale » : celle du sous-réseau de la passerelle, sinon
-    /// la première adresse DHCP, sinon la première tout court. Les adresses
-    /// APIPA (169.254.x.x) sont ignorées : elles signifient « pas de bail ».
-    pub fn primary(&self) -> Option<&IpEntry> {
-        let usable = || {
-            self.addresses
-                .iter()
-                .filter(|entry| !entry.cidr.addr.is_link_local())
-        };
-
-        usable()
-            .find(|entry| self.gateway.is_some_and(|gw| entry.cidr.contains(gw)))
-            .or_else(|| usable().find(|entry| entry.from_dhcp))
-            .or_else(|| usable().next())
-    }
-
-    pub fn has_dhcp_address(&self) -> bool {
-        self.addresses.iter().any(|e| e.from_dhcp)
-    }
-
-    pub fn has_address(&self, ip: Ipv4Addr) -> bool {
-        self.addresses.iter().any(|e| e.cidr.addr == ip)
-    }
-}
+use crate::platform::{AdapterInfo, IfaceId, IpEntry};
 
 const BLOCKLIST: &[&str] = &[
     "loopback",
@@ -95,7 +49,7 @@ pub fn read_adapters() -> Result<Vec<AdapterInfo>> {
     for adapter in &mut adapters {
         adapter.addresses = unicast
             .iter()
-            .filter(|(idx, _)| *idx == adapter.if_index)
+            .filter(|(idx, _)| *idx == adapter.id.index)
             .map(|(_, entry)| entry.clone())
             .collect();
     }
@@ -104,11 +58,9 @@ pub fn read_adapters() -> Result<Vec<AdapterInfo>> {
 
     let meta = unsafe { read_adapter_meta() };
     for adapter in &mut adapters {
-        if let Some((_, dhcp, dns)) = meta.iter().find(|(idx, _, _)| *idx == adapter.if_index) {
+        if let Some((_, dhcp, dns)) = meta.iter().find(|(idx, _, _)| *idx == adapter.id.index) {
             adapter.dhcp = *dhcp;
             adapter.dns = dns.clone();
-        } else {
-            adapter.dhcp = dhcp_enabled(&adapter.guid);
         }
         adapter.addresses.sort_by_key(|e| u32::from(e.cidr.addr));
     }
@@ -156,14 +108,18 @@ unsafe fn read_if_table() -> Result<Vec<AdapterInfo>> {
             String::new()
         };
 
+        let name = wide_to_string(&row.Alias);
         adapters.push(AdapterInfo {
-            name: wide_to_string(&row.Alias),
+            name: name.clone(),
             description: wide_to_string(&row.Description),
             mac,
-            guid: guid_to_string(&row.InterfaceGuid),
-            if_index: row.InterfaceIndex,
+            id: IfaceId {
+                index: row.InterfaceIndex,
+                name,
+            },
+            connection: None,
             is_up: row.OperStatus.0 == 1, // IfOperStatusUp
-            dhcp: false,
+            dhcp: dhcp_enabled(&guid_to_string(&row.InterfaceGuid)),
             addresses: Vec::new(),
             gateway: None,
             dns: Vec::new(),
@@ -250,7 +206,7 @@ unsafe fn read_gateways(adapters: &mut [AdapterInfo]) {
     for adapter in adapters.iter_mut() {
         adapter.gateway = best
             .iter()
-            .filter(|(idx, _, _)| *idx == adapter.if_index)
+            .filter(|(idx, _, _)| *idx == adapter.id.index)
             .min_by_key(|(_, _, metric)| *metric)
             .map(|(_, gw, _)| *gw);
     }
@@ -366,8 +322,11 @@ mod tests {
             name: "test".into(),
             description: "test".into(),
             mac: "AA-BB-CC-DD-EE-FF".into(),
-            guid: String::new(),
-            if_index: 1,
+            id: IfaceId {
+                index: 1,
+                name: "test".into(),
+            },
+            connection: None,
             is_up: true,
             dhcp: true,
             addresses,
@@ -410,7 +369,7 @@ mod tests {
                 "{} | desc={} | idx={} | up={} | dhcp={} | gw={:?} | dns={:?} | mac={} | {:?}",
                 a.name,
                 a.description,
-                a.if_index,
+                a.id.index,
                 a.is_up,
                 a.dhcp,
                 a.gateway,

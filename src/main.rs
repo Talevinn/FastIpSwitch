@@ -3,16 +3,7 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
-mod cidr;
-mod i18n;
 mod icon;
-mod installer;
-mod log;
-mod net;
-mod netsh;
-mod store;
-mod win;
-mod worker;
 
 use std::cell::RefCell;
 use std::net::Ipv4Addr;
@@ -22,7 +13,7 @@ use std::time::Duration;
 
 use slint::{ModelRc, Timer, TimerMode, VecModel};
 
-use cidr::Cidr;
+use fastipswitch::{cidr::Cidr, i18n, log, platform, store, worker};
 use store::UiState;
 use worker::{AdapterRef, Event, Job};
 
@@ -37,9 +28,9 @@ fn parse_dns_list(text: &str) -> Result<Vec<Ipv4Addr>, String> {
         }
         let ip = raw
             .parse::<Ipv4Addr>()
-            .map_err(|_| crate::i18n::tr().invalid_dns(raw))?;
+            .map_err(|_| i18n::tr().invalid_dns(raw))?;
         if ip.is_unspecified() || ip.is_multicast() {
-            return Err(crate::i18n::tr().invalid_dns(raw));
+            return Err(i18n::tr().invalid_dns(raw));
         }
         if !servers.contains(&ip) {
             servers.push(ip);
@@ -59,7 +50,7 @@ struct App {
     window: slint::Weak<MainWindow>,
     tray: Option<slint::Weak<AppTray>>,
     admin: bool,
-    adapters: Vec<net::AdapterInfo>,
+    adapters: Vec<platform::AdapterInfo>,
     selected: usize,
     aliases: Vec<Alias>,
     next_id: i32,
@@ -76,11 +67,51 @@ struct App {
     events: Receiver<Event>,
 }
 
+fn print_adapters() -> anyhow::Result<()> {
+    let adapters = platform::read_adapters().map_err(anyhow::Error::msg)?;
+    for adapter in adapters {
+        let addresses = adapter
+            .addresses
+            .iter()
+            .map(|entry| {
+                format!(
+                    "{}{}",
+                    entry.cidr,
+                    if entry.from_dhcp { " (dhcp)" } else { "" }
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
+        println!(
+            "{}\tindex={}\tmac={}\tup={}\tdhcp={}\tgw={}\tdns={}\tconn={}\t{}",
+            adapter.name,
+            adapter.id.index,
+            adapter.mac,
+            adapter.is_up,
+            adapter.dhcp,
+            adapter.gateway.map(|g| g.to_string()).unwrap_or_default(),
+            adapter
+                .dns
+                .iter()
+                .map(|ip| ip.to_string())
+                .collect::<Vec<_>>()
+                .join(","),
+            adapter.connection.unwrap_or_default(),
+            addresses
+        );
+    }
+    Ok(())
+}
+
 fn main() -> anyhow::Result<()> {
+    if std::env::args().any(|arg| arg == "--print-adapters") {
+        return print_adapters();
+    }
+
     log::init();
     log::write("--- démarrage de FastIpSwitch ---");
 
-    let admin = win::is_admin();
+    let admin = platform::is_admin();
     let wants_elevate = std::env::args().any(|arg| arg == "--elevate");
     log::write(if admin {
         "Mode administrateur"
@@ -89,29 +120,29 @@ fn main() -> anyhow::Result<()> {
     });
 
     if wants_elevate && !admin {
-        if win::admin_instance_running() {
-            win::info_box(crate::i18n::tr().already_running_admin());
+        if platform::admin_instance_running() {
+            platform::info_box(i18n::tr().already_running_admin());
             return Ok(());
         }
-        if let Err(e) = win::elevate_self() {
-            win::error_box(&crate::i18n::tr().elevate_failed(&e));
+        if let Err(e) = platform::elevate_self() {
+            platform::error_box(&i18n::tr().elevate_failed(&e));
         }
         return Ok(());
     }
 
-    if !win::single_instance(admin) {
-        win::info_box(crate::i18n::tr().already_running());
+    if !platform::single_instance(admin) {
+        platform::info_box(i18n::tr().already_running());
         return Ok(());
     }
 
-    let mut adapters = net::read_adapters().unwrap_or_default();
+    let mut adapters = platform::read_adapters().unwrap_or_default();
     let recovery = if admin {
         worker::recover_pending(&adapters)
     } else {
         None
     };
     if recovery.is_some() {
-        adapters = net::read_adapters().unwrap_or_default();
+        adapters = platform::read_adapters().unwrap_or_default();
     }
 
     let forced_theme = std::env::var("FASTIPSWITCH_THEME").ok().and_then(|value| {
@@ -125,7 +156,7 @@ fn main() -> anyhow::Result<()> {
     let window = MainWindow::new()?;
     window
         .global::<RackTheme>()
-        .set_dark(forced_theme.unwrap_or_else(win::system_is_dark));
+        .set_dark(forced_theme.unwrap_or_else(platform::system_is_dark));
     window.set_admin(admin);
     window.set_logo(icon::logo_image());
 
@@ -139,7 +170,7 @@ fn main() -> anyhow::Result<()> {
     };
 
     {
-        let t = crate::i18n::tr();
+        let t = i18n::tr();
         window.set_t_address(t.address_label().into());
         window.set_t_virtual(t.virtual_label().into());
         window.set_t_apply(t.apply().into());
@@ -169,9 +200,9 @@ fn main() -> anyhow::Result<()> {
         window.set_t_dns_label(t.dns_label().into());
         window.set_t_dns_placeholder(t.dns_placeholder().into());
         window.set_t_autostart_tip(t.autostart_tip().into());
-        window.set_installed(installer::is_installed());
-        window.set_autostart(installer::autostart_enabled());
-        window.set_install_dir(installer::install_dir().display().to_string().into());
+        window.set_installed(platform::is_installed());
+        window.set_autostart(platform::autostart_enabled());
+        window.set_install_dir(platform::install_dir().display().to_string().into());
         if let Some(tray) = &tray {
             tray.set_menu_show(t.menu_show().into());
             tray.set_menu_dhcp(t.menu_dhcp().into());
@@ -245,18 +276,18 @@ fn main() -> anyhow::Result<()> {
         let app = app.clone();
         window.on_elevate(move || {
             log::write("Demande d'élévation");
-            if win::admin_instance_running() {
+            if platform::admin_instance_running() {
                 app.borrow()
-                    .set_lock_error(crate::i18n::tr().admin_instance_running().into());
+                    .set_lock_error(i18n::tr().admin_instance_running().into());
                 return;
             }
-            match win::elevate_self() {
+            match platform::elevate_self() {
                 Ok(()) => {
                     let _ = slint::quit_event_loop();
                 }
                 Err(e) => app
                     .borrow()
-                    .set_lock_error(crate::i18n::tr().elevation_cancelled(&e)),
+                    .set_lock_error(i18n::tr().elevation_cancelled(&e)),
             }
         });
     }
@@ -271,8 +302,8 @@ fn main() -> anyhow::Result<()> {
             if !app.borrow().admin {
                 return;
             }
-            let t = crate::i18n::tr();
-            match installer::install(autostart) {
+            let t = i18n::tr();
+            match platform::install(autostart) {
                 Ok(path) => {
                     if let Some(window) = app.borrow().window.upgrade() {
                         window.set_installer_open(false);
@@ -353,7 +384,7 @@ fn main() -> anyhow::Result<()> {
     let theme_timer = Timer::default();
     let theme_window = window.as_weak();
     theme_timer.start(TimerMode::Repeated, Duration::from_secs(1), move || {
-        if !admin && win::admin_instance_running() {
+        if !admin && platform::admin_instance_running() {
             let _ = slint::quit_event_loop();
             return;
         }
@@ -362,7 +393,7 @@ fn main() -> anyhow::Result<()> {
         }
         if let Some(window) = theme_window.upgrade() {
             let theme = window.global::<RackTheme>();
-            let dark = win::system_is_dark();
+            let dark = platform::system_is_dark();
             if theme.get_dark() != dark {
                 theme.set_dark(dark);
             }
@@ -388,7 +419,7 @@ impl App {
         window: &MainWindow,
         tray: Option<&AppTray>,
         admin: bool,
-        adapters: Vec<net::AdapterInfo>,
+        adapters: Vec<platform::AdapterInfo>,
         ui_state: UiState,
         jobs: Sender<Job>,
         events: Receiver<Event>,
@@ -435,7 +466,7 @@ impl App {
             session_dirty: store::load_session()
                 .map(|session| !session.is_empty())
                 .unwrap_or(false),
-            message: crate::i18n::tr().ready().into(),
+            message: i18n::tr().ready().into(),
             message_error: false,
             quitting: false,
             jobs,
@@ -445,7 +476,7 @@ impl App {
         app
     }
 
-    fn adapter(&self) -> Option<&net::AdapterInfo> {
+    fn adapter(&self) -> Option<&platform::AdapterInfo> {
         self.adapters.get(self.selected)
     }
 
@@ -501,7 +532,7 @@ impl App {
         let is_dhcp = self.adapters.get(self.selected).is_some_and(|a| a.dhcp);
         window.set_dhcp_mode(is_dhcp);
 
-        let t = crate::i18n::tr();
+        let t = i18n::tr();
         let (status, mode) = match self.adapters.get(self.selected) {
             Some(adapter) => (
                 adapter
@@ -563,7 +594,7 @@ impl App {
     }
 
     fn refresh(&mut self) {
-        match net::read_adapters() {
+        match platform::read_adapters() {
             Ok(adapters) => {
                 let mac = self.adapter().map(|a| a.mac.clone());
                 self.adapters = adapters;
@@ -578,11 +609,11 @@ impl App {
                 if self.selected >= self.adapters.len() {
                     self.selected = 0;
                 }
-                self.message = crate::i18n::tr().refreshed().into();
+                self.message = i18n::tr().refreshed().into();
                 self.message_error = false;
             }
             Err(e) => {
-                self.message = crate::i18n::tr().read_failed(&e.to_string());
+                self.message = i18n::tr().read_failed(&e.to_string());
                 self.message_error = true;
             }
         }
@@ -598,26 +629,26 @@ impl App {
             return;
         }
         if self.session_dirty {
-            self.set_message(crate::i18n::tr().finish_changes_first(), true);
+            self.set_message(i18n::tr().finish_changes_first(), true);
             return;
         }
         if self.aliases.iter().any(|a| a.enabled) {
-            self.set_message(crate::i18n::tr().disable_aliases_first(), true);
+            self.set_message(i18n::tr().disable_aliases_first(), true);
             return;
         }
 
         // Relit l'état réel : le Wi-Fi a pu se reconnecter, un bail DHCP
         // arriver, l'adaptateur disparaître, etc.
-        match net::read_adapters() {
+        match platform::read_adapters() {
             Ok(adapters) => self.adapters = adapters,
             Err(e) => {
-                self.set_message(crate::i18n::tr().read_failed(&e.to_string()), true);
+                self.set_message(i18n::tr().read_failed(&e.to_string()), true);
                 return;
             }
         }
 
         let Some(pos) = self.adapters.iter().position(|a| a.name == name) else {
-            self.set_message(crate::i18n::tr().adapter_not_found(name), true);
+            self.set_message(i18n::tr().adapter_not_found(name), true);
             return;
         };
 
@@ -629,11 +660,11 @@ impl App {
         self.push_inputs();
 
         if self.adapters[pos].primary().is_none() {
-            self.set_message(crate::i18n::tr().no_usable_address(name), true);
+            self.set_message(i18n::tr().no_usable_address(name), true);
             return;
         }
 
-        self.message = crate::i18n::tr().adapter_selected(&self.adapters[pos].name);
+        self.message = i18n::tr().adapter_selected(&self.adapters[pos].name);
         self.message_error = false;
         self.sync();
     }
@@ -643,7 +674,7 @@ impl App {
             return;
         }
         let Some(adapter) = self.adapter().cloned() else {
-            self.set_message(crate::i18n::tr().no_adapter_selected(), true);
+            self.set_message(i18n::tr().no_adapter_selected(), true);
             return;
         };
 
@@ -675,23 +706,23 @@ impl App {
             "" => None,
             raw => match raw.parse::<Ipv4Addr>() {
                 Ok(gateway) if gateway == cidr.addr => {
-                    self.set_message(crate::i18n::tr().gateway_is_address(), true);
+                    self.set_message(i18n::tr().gateway_is_address(), true);
                     return;
                 }
                 Ok(gateway) if !cidr.contains(gateway) => {
-                    self.set_message(crate::i18n::tr().gateway_not_in_subnet(gateway, cidr), true);
+                    self.set_message(i18n::tr().gateway_not_in_subnet(gateway, cidr), true);
                     return;
                 }
                 Ok(gateway)
                     if cidr.prefix <= 30
                         && (gateway == cidr.network() || gateway == cidr.broadcast()) =>
                 {
-                    self.set_message(crate::i18n::tr().gateway_not_host(gateway), true);
+                    self.set_message(i18n::tr().gateway_not_host(gateway), true);
                     return;
                 }
                 Ok(gateway) => Some(gateway),
                 Err(_) => {
-                    self.set_message(crate::i18n::tr().invalid_gateway(raw), true);
+                    self.set_message(i18n::tr().invalid_gateway(raw), true);
                     return;
                 }
             },
@@ -718,7 +749,7 @@ impl App {
             .collect();
 
         self.busy = true;
-        self.message = crate::i18n::tr().applying(cidr);
+        self.message = i18n::tr().applying(cidr);
         self.message_error = false;
         self.sync();
 
@@ -736,12 +767,12 @@ impl App {
             return;
         }
         let Some(adapter) = self.adapter().cloned() else {
-            self.set_message(crate::i18n::tr().no_adapter_selected(), true);
+            self.set_message(i18n::tr().no_adapter_selected(), true);
             return;
         };
 
         self.busy = true;
-        self.message = crate::i18n::tr().returning_dhcp().into();
+        self.message = i18n::tr().returning_dhcp().into();
         self.message_error = false;
         self.sync();
 
@@ -755,7 +786,7 @@ impl App {
             return;
         }
         let Some(adapter) = self.adapter().cloned() else {
-            self.set_message(crate::i18n::tr().no_adapter_selected(), true);
+            self.set_message(i18n::tr().no_adapter_selected(), true);
             return;
         };
 
@@ -768,7 +799,7 @@ impl App {
         };
 
         if adapter.has_address(cidr.addr) || self.aliases.iter().any(|a| a.cidr.addr == cidr.addr) {
-            self.set_message(crate::i18n::tr().alias_exists(cidr.addr), true);
+            self.set_message(i18n::tr().alias_exists(cidr.addr), true);
             return;
         }
 
@@ -788,7 +819,7 @@ impl App {
         }
 
         self.busy = true;
-        self.message = crate::i18n::tr().enabling(cidr);
+        self.message = i18n::tr().enabling(cidr);
         self.message_error = false;
         self.sync();
 
@@ -815,15 +846,15 @@ impl App {
         let cidr = alias.cidr;
 
         let Some(adapter) = self.adapter().cloned() else {
-            self.set_message(crate::i18n::tr().no_adapter_selected(), true);
+            self.set_message(i18n::tr().no_adapter_selected(), true);
             return;
         };
 
         self.busy = true;
         self.message = if checked {
-            crate::i18n::tr().enabling(cidr)
+            i18n::tr().enabling(cidr)
         } else {
-            crate::i18n::tr().disabling(cidr)
+            i18n::tr().disabling(cidr)
         };
         self.message_error = false;
         self.sync();
@@ -846,14 +877,14 @@ impl App {
 
         if self.aliases[pos].enabled {
             let Some(adapter) = self.adapter().cloned() else {
-                self.set_message(crate::i18n::tr().no_adapter_selected(), true);
+                self.set_message(i18n::tr().no_adapter_selected(), true);
                 return;
             };
             self.aliases[pos].busy = true;
             let cidr = self.aliases[pos].cidr;
 
             self.busy = true;
-            self.message = crate::i18n::tr().removing(cidr);
+            self.message = i18n::tr().removing(cidr);
             self.message_error = false;
             self.sync();
 
@@ -865,7 +896,7 @@ impl App {
         } else {
             self.aliases.remove(pos);
             self.persist_aliases();
-            self.message = crate::i18n::tr().alias_removed().into();
+            self.message = i18n::tr().alias_removed().into();
             self.message_error = false;
             self.sync();
         }
@@ -882,7 +913,7 @@ impl App {
         }
         self.quitting = true;
         self.busy = true;
-        self.message = crate::i18n::tr().restoring_quit().into();
+        self.message = i18n::tr().restoring_quit().into();
         self.message_error = false;
         self.sync();
         let _ = self.jobs.send(Job::Quit);
@@ -915,7 +946,7 @@ impl App {
             return;
         }
 
-        let Ok(adapters) = net::read_adapters() else {
+        let Ok(adapters) = platform::read_adapters() else {
             return;
         };
 
@@ -957,7 +988,7 @@ impl App {
 
         app.fill_inputs();
         app.push_inputs();
-        app.message = crate::i18n::tr().adapter_selected(&candidate_name);
+        app.message = i18n::tr().adapter_selected(&candidate_name);
         app.message_error = false;
         app.sync();
     }

@@ -7,26 +7,10 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use crate::cidr::Cidr;
-use crate::net::{self, AdapterInfo};
-use crate::netsh;
+use crate::platform::{self, AdapterInfo, IfaceId};
 use crate::store::{self, Session};
 
-#[derive(Clone, Debug)]
-pub struct AdapterRef {
-    pub index: u32,
-    pub mac: String,
-    pub dhcp: bool,
-}
-
-impl From<&AdapterInfo> for AdapterRef {
-    fn from(adapter: &AdapterInfo) -> Self {
-        Self {
-            index: adapter.if_index,
-            mac: adapter.mac.clone(),
-            dhcp: adapter.dhcp,
-        }
-    }
-}
+pub use crate::platform::AdapterRef;
 
 #[derive(Debug)]
 pub enum Job {
@@ -75,7 +59,7 @@ pub enum Event {
 pub fn spawn(events: Sender<Event>) -> Sender<Job> {
     let (tx, rx) = std::sync::mpsc::channel::<Job>();
     thread::Builder::new()
-        .name("netsh-worker".into())
+        .name("network-worker".into())
         .spawn(move || {
             let session = Arc::new(Mutex::new(store::load_session().unwrap_or_default()));
             while let Ok(job) = rx.recv() {
@@ -86,7 +70,7 @@ pub fn spawn(events: Sender<Event>) -> Sender<Job> {
                 let _ = events.send(Event::Busy(false));
             }
         })
-        .expect("impossible de démarrer le thread netsh");
+        .expect("impossible de démarrer le thread réseau");
     tx
 }
 
@@ -116,7 +100,7 @@ fn handle(job: Job, session: &Arc<Mutex<Session>>, tx: &Sender<Event>) {
             aliases,
         } => apply_static(&adapter, &cidr, gateway, &dns, &aliases, session, tx),
         Job::SetDhcp { adapter } => {
-            let result = restore_defaults(adapter.index, session, tx);
+            let result = restore_defaults(&adapter.id, session, tx);
             if result.is_ok() {
                 let _ = tx.send(Event::Message {
                     text: crate::i18n::tr().dhcp_done().into(),
@@ -131,7 +115,7 @@ fn handle(job: Job, session: &Arc<Mutex<Session>>, tx: &Sender<Event>) {
                 let _ = tx.send(Event::QuitReady);
                 Ok(())
             } else {
-                match restore_defaults(snapshot.if_index, session, tx) {
+                match restore_defaults(&snapshot.iface(), session, tx) {
                     Ok(()) => {
                         let _ = tx.send(Event::QuitReady);
                         Ok(())
@@ -154,14 +138,24 @@ fn handle(job: Job, session: &Arc<Mutex<Session>>, tx: &Sender<Event>) {
     }
 }
 
+impl Session {
+    /// Interface ciblée par une session (rétrocompatible avec `if_index`).
+    fn iface(&self) -> IfaceId {
+        IfaceId {
+            index: self.if_index,
+            name: self.ifname.clone(),
+        }
+    }
+}
+
 fn refresh(tx: &Sender<Event>) {
-    match net::read_adapters() {
+    match platform::read_adapters() {
         Ok(adapters) => {
             let _ = tx.send(Event::Adapters(adapters));
         }
         Err(e) => {
             let _ = tx.send(Event::Message {
-                text: crate::i18n::tr().read_config_failed(&e.to_string()),
+                text: crate::i18n::tr().read_config_failed(&e),
                 error: true,
             });
         }
@@ -181,18 +175,22 @@ fn add_alias(
     {
         let mut s = session.lock().unwrap();
         s.adapter_mac = adapter.mac.clone();
-        s.if_index = adapter.index;
+        s.ifname = adapter.id.name.clone();
+        s.connection = adapter.connection.clone();
+        s.if_index = adapter.id.index;
         s.pending = Some(cidr.to_string());
         s.coexistence = true;
         store::save_session(&s);
     }
 
-    let result = (|| -> Result<(), String> {
-        netsh::set_coexistence(adapter.index, true)?;
-        netsh::add_address(adapter.index, cidr)?;
+    let backend = platform::backend();
 
-        let adapters = net::read_adapters().unwrap_or_default();
-        let current = adapters.iter().find(|a| a.if_index == adapter.index);
+    let result = (|| -> Result<(), String> {
+        backend.set_coexistence(&adapter.id, true)?;
+        backend.add_address(&adapter.id, cidr)?;
+
+        let adapters = platform::read_adapters().unwrap_or_default();
+        let current = adapters.iter().find(|a| a.id == adapter.id);
 
         if let Some(current) = current {
             if !current.has_address(cidr.addr) {
@@ -218,21 +216,21 @@ fn add_alias(
     })();
 
     if result.is_err() {
-        let _ = netsh::delete_address(adapter.index, cidr.addr);
+        let _ = backend.delete_address(&adapter.id, cidr);
 
-        // DHCP a-t-il été coupé par Windows pendant l'ajout ?
+        // DHCP a-t-il été coupé pendant l'ajout ?
         if adapter.dhcp {
-            let dhcp_lost = net::read_adapters()
+            let dhcp_lost = platform::read_adapters()
                 .unwrap_or_default()
                 .iter()
-                .find(|a| a.if_index == adapter.index)
+                .find(|a| a.id == adapter.id)
                 .is_some_and(|a| !a.dhcp || !a.has_dhcp_address());
             if dhcp_lost {
-                let _ = netsh::set_dhcp(adapter.index);
+                let _ = backend.set_dhcp(&adapter.id);
             }
         }
         if !previous.coexistence {
-            let _ = netsh::set_coexistence(adapter.index, false);
+            let _ = backend.set_coexistence(&adapter.id, false);
         }
 
         {
@@ -265,7 +263,9 @@ fn remove_alias_inner(
     tx: &Sender<Event>,
     remove_row: bool,
 ) -> Result<(), String> {
-    if let Err(e) = netsh::delete_address(adapter.index, cidr.addr) {
+    let backend = platform::backend();
+
+    if let Err(e) = backend.delete_address(&adapter.id, cidr) {
         // La ligne reste dans la liste, mais on la débloque.
         let _ = tx.send(Event::AliasState { id, enabled: true });
         return Err(e);
@@ -277,7 +277,7 @@ fn remove_alias_inner(
 
         if s.applied.is_empty() && s.pending.is_none() {
             s.coexistence = false;
-            let _ = netsh::set_coexistence(adapter.index, false);
+            let _ = backend.set_coexistence(&adapter.id, false);
         }
 
         if s.is_empty() {
@@ -315,7 +315,9 @@ fn apply_static(
     {
         let mut s = session.lock().unwrap();
         s.adapter_mac = adapter.mac.clone();
-        s.if_index = adapter.index;
+        s.ifname = adapter.id.name.clone();
+        s.connection = adapter.connection.clone();
+        s.if_index = adapter.id.index;
         s.static_set = true;
         s.pending = Some(cidr.to_string());
         if !dns.is_empty() {
@@ -324,7 +326,9 @@ fn apply_static(
         store::save_session(&s);
     }
 
-    if let Err(e) = netsh::set_static(adapter.index, cidr, gateway) {
+    let backend = platform::backend();
+
+    if let Err(e) = backend.set_static(&adapter.id, cidr, gateway) {
         let mut s = session.lock().unwrap();
         *s = previous;
         if s.is_empty() {
@@ -337,12 +341,12 @@ fn apply_static(
 
     let mut warnings = Vec::new();
     if !dns.is_empty()
-        && let Err(e) = netsh::set_dns_static(adapter.index, dns)
+        && let Err(e) = backend.set_dns_static(&adapter.id, dns)
     {
         warnings.push(format!("DNS : {e}"));
     }
     for alias in aliases {
-        if let Err(e) = netsh::add_address(adapter.index, alias) {
+        if let Err(e) = backend.add_address(&adapter.id, alias) {
             warnings.push(format!("{alias} : {e}"));
         }
     }
@@ -354,10 +358,10 @@ fn apply_static(
         store::save_session(&s);
     }
 
-    let adapters = net::read_adapters().unwrap_or_default();
+    let adapters = platform::read_adapters().unwrap_or_default();
     let applied = adapters
         .iter()
-        .find(|a| a.if_index == adapter.index)
+        .find(|a| a.id == adapter.id)
         .is_some_and(|a| a.has_address(cidr.addr));
 
     let _ = tx.send(Event::Adapters(adapters));
@@ -380,11 +384,12 @@ fn apply_static(
 }
 
 fn restore_defaults(
-    if_index: u32,
+    id: &IfaceId,
     session: &Arc<Mutex<Session>>,
     tx: &Sender<Event>,
 ) -> Result<(), String> {
     let snapshot = session.lock().unwrap().clone();
+    let backend = platform::backend();
 
     let mut addresses = snapshot.applied.clone();
     if let Some(pending) = &snapshot.pending {
@@ -392,20 +397,20 @@ fn restore_defaults(
     }
     for item in addresses {
         if let Ok(cidr) = Cidr::parse(&item) {
-            let _ = netsh::delete_address(if_index, cidr.addr);
+            let _ = backend.delete_address(id, &cidr);
         }
     }
 
-    let already_dhcp = net::read_adapters()
+    let already_dhcp = platform::read_adapters()
         .ok()
-        .and_then(|list| list.into_iter().find(|a| a.if_index == if_index))
+        .and_then(|list| list.into_iter().find(|a| a.id == *id))
         .map(|a| a.dhcp)
         .unwrap_or(false);
 
     let dhcp = if already_dhcp {
         Ok(())
     } else {
-        netsh::set_dhcp(if_index)
+        backend.set_dhcp(id)
     };
     if let Err(e) = dhcp {
         refresh(tx);
@@ -413,13 +418,13 @@ fn restore_defaults(
     }
 
     if snapshot.dns_set
-        && let Err(e) = netsh::reset_dns_dhcp(if_index)
+        && let Err(e) = backend.reset_dns_dhcp(id)
     {
         refresh(tx);
         return Err(e);
     }
     if snapshot.coexistence {
-        let _ = netsh::set_coexistence(if_index, false);
+        let _ = backend.set_coexistence(id, false);
     }
 
     {
@@ -444,8 +449,10 @@ pub fn recover_pending(adapters: &[AdapterInfo]) -> Option<String> {
     let Some(target) = adapters.iter().find(|a| {
         if !session.adapter_mac.is_empty() {
             a.mac.eq_ignore_ascii_case(&session.adapter_mac)
+        } else if !session.ifname.is_empty() {
+            a.id.name == session.ifname
         } else if session.if_index != 0 {
-            a.if_index == session.if_index
+            a.id.index == session.if_index
         } else {
             false
         }
@@ -454,11 +461,13 @@ pub fn recover_pending(adapters: &[AdapterInfo]) -> Option<String> {
         return Some(crate::i18n::tr().recover_missing_adapter().to_string());
     };
 
-    let if_index = target.if_index;
+    let id = target.id.clone();
     let already_dhcp = target.dhcp;
+    let backend = platform::backend();
 
     crate::log::write(&format!(
-        "Récupération de la session précédente sur l'interface {if_index}"
+        "Récupération de la session précédente sur l'interface {}",
+        id.name
     ));
 
     let mut addresses = session.applied.clone();
@@ -467,20 +476,20 @@ pub fn recover_pending(adapters: &[AdapterInfo]) -> Option<String> {
     }
     for item in addresses {
         if let Ok(cidr) = Cidr::parse(&item) {
-            let _ = netsh::delete_address(if_index, cidr.addr);
+            let _ = backend.delete_address(&id, &cidr);
         }
     }
 
-    if !already_dhcp && let Err(e) = netsh::set_dhcp(if_index) {
+    if !already_dhcp && let Err(e) = backend.set_dhcp(&id) {
         return Some(crate::i18n::tr().recover_partial(&e));
     }
     if session.dns_set
-        && let Err(e) = netsh::reset_dns_dhcp(if_index)
+        && let Err(e) = backend.reset_dns_dhcp(&id)
     {
         return Some(crate::i18n::tr().recover_partial(&e));
     }
     if session.coexistence {
-        let _ = netsh::set_coexistence(if_index, false);
+        let _ = backend.set_coexistence(&id, false);
     }
     store::clear_session();
 

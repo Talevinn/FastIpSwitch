@@ -6,8 +6,6 @@ use std::io::Write;
 use std::path::PathBuf;
 use std::sync::OnceLock;
 
-use windows::Win32::System::SystemInformation::GetLocalTime;
-
 static LOG_PATH: OnceLock<PathBuf> = OnceLock::new();
 
 pub fn init() -> PathBuf {
@@ -34,7 +32,8 @@ pub fn write(msg: &str) {
     let Some(path) = LOG_PATH.get() else {
         return;
     };
-    let line = format!("[{}] {msg}\r\n", timestamp());
+    let newline = if cfg!(windows) { "\r\n" } else { "\n" };
+    let line = format!("[{}] {msg}{newline}", timestamp());
     if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
         let _ = file.write_all(line.as_bytes());
     }
@@ -43,9 +42,5 @@ pub fn write(msg: &str) {
 }
 
 fn timestamp() -> String {
-    let st = unsafe { GetLocalTime() };
-    format!(
-        "{:02}:{:02}:{:02}.{:03}",
-        st.wHour, st.wMinute, st.wSecond, st.wMilliseconds
-    )
+    chrono::Local::now().format("%H:%M:%S%.3f").to_string()
 }

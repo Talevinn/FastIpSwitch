@@ -5,6 +5,8 @@ use std::fmt;
 use std::net::Ipv4Addr;
 use std::str::FromStr;
 
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de};
+
 /// Adresse IPv4 avec longueur de préfixe, au format `192.168.2.10/24`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct Cidr {
@@ -117,6 +119,25 @@ impl Cidr {
 impl fmt::Display for Cidr {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}/{}", self.addr, self.prefix)
+    }
+}
+
+impl Serialize for Cidr {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.collect_str(self)
+    }
+}
+
+impl<'de> Deserialize<'de> for Cidr {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let text = String::deserialize(deserializer)?;
+        Cidr::parse(&text).map_err(de::Error::custom)
     }
 }
 

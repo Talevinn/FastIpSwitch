@@ -28,12 +28,8 @@ fn detect() -> Lang {
         }
     }
 
-    #[cfg(windows)]
-    {
-        let id = unsafe { windows::Win32::Globalization::GetUserDefaultUILanguage() };
-        if (id & 0x3ff) == 0x0c {
-            return Lang::Fr;
-        }
+    if crate::platform::lang_is_french() {
+        return Lang::Fr;
     }
 
     Lang::En
@@ -159,13 +155,30 @@ impl T {
         self.pick("Destination :", "Destination:")
     }
     pub fn install_autostart(&self) -> &'static str {
-        self.pick("LANCER AU DÉMARRAGE", "START WITH WINDOWS")
+        #[cfg(windows)]
+        {
+            self.pick("LANCER AU DÉMARRAGE", "START WITH WINDOWS")
+        }
+        #[cfg(not(windows))]
+        {
+            self.pick("LANCER À L'OUVERTURE DE SESSION", "START AT LOGIN")
+        }
     }
     pub fn install_autostart_hint(&self) -> &'static str {
-        self.pick(
-            "Tâche planifiée élevée, sans UAC au logon.",
-            "Elevated scheduled task, no UAC at logon.",
-        )
+        #[cfg(windows)]
+        {
+            self.pick(
+                "Tâche planifiée élevée, sans UAC au logon.",
+                "Elevated scheduled task, no UAC at logon.",
+            )
+        }
+        #[cfg(not(windows))]
+        {
+            self.pick(
+                "Fichier XDG dans ~/.config/autostart.",
+                "XDG file in ~/.config/autostart.",
+            )
+        }
     }
     pub fn install_button(&self) -> &'static str {
         self.pick("INSTALLER", "INSTALL")
@@ -199,8 +212,8 @@ impl T {
 
     pub fn already_running(&self) -> &'static str {
         self.pick(
-            "FastIpSwitch est déjà lancé.\nRegarde la zone de notification Windows.",
-            "FastIpSwitch is already running.\nCheck the Windows notification area.",
+            "FastIpSwitch est déjà lancé.\nRegarde la zone de notification.",
+            "FastIpSwitch is already running.\nCheck the notification area.",
         )
     }
     pub fn already_running_admin(&self) -> &'static str {
@@ -449,6 +462,36 @@ impl T {
         match lang() {
             Lang::Fr => format!("Impossible de lancer netsh : {error}"),
             Lang::En => format!("Unable to start netsh: {error}"),
+        }
+    }
+
+    // --- Linux : helper privilégié et commandes système ---
+    pub fn command_failed(&self, program: &str, details: &str) -> String {
+        match lang() {
+            Lang::Fr => format!("{program} a échoué : {details}"),
+            Lang::En => format!("{program} failed: {details}"),
+        }
+    }
+    pub fn helper_missing(&self) -> String {
+        match lang() {
+            Lang::Fr => "Helper privilégié introuvable : installe le paquet FastIpSwitch ou définis FASTIPSWITCH_HELPER.".into(),
+            Lang::En => "Privileged helper not found: install the FastIpSwitch package or set FASTIPSWITCH_HELPER.".into(),
+        }
+    }
+    pub fn auth_cancelled(&self) -> String {
+        match lang() {
+            Lang::Fr => "Authentification annulée : aucune modification appliquée.".into(),
+            Lang::En => "Authentication cancelled: no change applied.".into(),
+        }
+    }
+    pub fn auth_failed(&self, code: i32) -> String {
+        match lang() {
+            Lang::Fr => format!(
+                "Authentification refusée ou impossible (code {code}). Vérifie la policy polkit."
+            ),
+            Lang::En => format!(
+                "Authentication refused or unavailable (code {code}). Check the polkit policy."
+            ),
         }
     }
 

@@ -48,6 +48,12 @@ pub fn is_admin() -> bool {
     unsafe { IsUserAnAdmin().as_bool() }
 }
 
+/// Langue d'interface Windows : vrai si le français est la langue principale.
+pub fn lang_is_french() -> bool {
+    let id = unsafe { windows::Win32::Globalization::GetUserDefaultUILanguage() };
+    (id & 0x3ff) == 0x0c
+}
+
 /// Relance l'exécutable courant via UAC (`runas`).
 pub fn elevate_self() -> Result<(), String> {
     let exe = std::env::current_exe().map_err(|e| format!("chemin de l'exécutable : {e}"))?;

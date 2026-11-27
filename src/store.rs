@@ -3,51 +3,20 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::OnceLock;
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
 
 use crate::cidr::Cidr;
 
-fn env_dir(var: &str) -> PathBuf {
-    std::env::var_os(var)
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("."))
-        .join("FastIpSwitch")
-}
-
-/// Mode portable : si un dossier `data` peut être créé/écrit à côté de
-/// l'exécutable, on y stocke tout. Sinon, repli sur les dossiers Windows.
-fn portable_dir() -> Option<&'static PathBuf> {
-    static PORTABLE: OnceLock<Option<PathBuf>> = OnceLock::new();
-
-    PORTABLE
-        .get_or_init(|| {
-            if cfg!(test) {
-                return None;
-            }
-            let exe = std::env::current_exe().ok()?;
-            let data = exe.parent()?.join("data");
-            fs::create_dir_all(&data).ok()?;
-            let probe = data.join(".write-test");
-            fs::write(&probe, b"ok").ok()?;
-            let _ = fs::remove_file(&probe);
-            Some(data)
-        })
-        .as_ref()
-}
-
-pub fn local_dir() -> PathBuf {
-    portable_dir()
-        .cloned()
-        .unwrap_or_else(|| env_dir("LOCALAPPDATA"))
-}
-
+/// Répertoire des préférences (XDG sous Linux, `%APPDATA%` sous Windows).
 pub fn config_dir() -> PathBuf {
-    portable_dir()
-        .cloned()
-        .unwrap_or_else(|| env_dir("APPDATA"))
+    crate::platform::config_dir()
+}
+
+/// Répertoire d'état : session de récupération et journal.
+pub fn local_dir() -> PathBuf {
+    crate::platform::local_dir()
 }
 
 fn ui_state_path() -> PathBuf {
@@ -76,6 +45,10 @@ pub struct UiState {
 #[serde(default)]
 pub struct Session {
     pub adapter_mac: String,
+    /// Nom système de l'interface (Linux : `eth0` ; Windows : vide).
+    pub ifname: String,
+    /// UUID de la connexion NetworkManager active au moment de l'application.
+    pub connection: Option<String>,
     pub if_index: u32,
     pub applied: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -177,6 +150,8 @@ mod tests {
     fn session_toml_roundtrip_without_pending() {
         let session = Session {
             adapter_mac: "08-3A-88-59-27-40".into(),
+            ifname: String::new(),
+            connection: None,
             if_index: 12,
             applied: vec!["192.168.3.10/24".into()],
             pending: None,

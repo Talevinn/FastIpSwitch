@@ -997,7 +997,10 @@ name = "fastipswitch"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "chrono",
+ "libc",
  "serde",
+ "serde_json",
  "slint",
  "slint-build",
  "toml",
