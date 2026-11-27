@@ -12,7 +12,7 @@ Linux se construit depuis les sources : `packaging/build-deb.sh` produit un `.de
 
 FastIpSwitch (Rust + [Slint](https://slint.dev)) est un utilitaire **Windows et Linux** pour **changer rapidement l'adresse IPv4** d'un PC et **ajouter ou retirer à la volée des IP virtuelles**, afin de configurer ou d'interroger du matériel situé sur un autre plan d'adressage : équipements neufs en IP par défaut, anciens équipements en IP fixe, baies de test, matériel AV, etc.
 
-Sous Windows, toutes les modifications réseau passent par **`netsh interface ipv4`** ; la disposition et le comportement Windows sont inchangés. Sous Linux, elles passent par un petit helper privilégié (`nmcli` quand NetworkManager gère l'interface, `ip` sinon). L'interface suit le thème clair/sombre et la langue du système (français/anglais).
+Sous Windows, toutes les modifications réseau passent par **`netsh interface ipv4`** ; le backend et le déroulé Windows sont inchangés. Sous Linux, elles passent par un petit helper privilégié (`nmcli` quand NetworkManager gère l'interface, `ip` sinon). L'interface suit le thème clair/sombre et la langue du système (français/anglais).
 
 | Thème sombre | Thème clair | Sans élévation (Windows) |
 |---|---|---|
@@ -58,7 +58,7 @@ L'adressage (IP, masque, passerelle, alias) est appliqué en **`store=active`** 
 - **Adresse principale fixe** : `set address source=static ... store=active`, puis les alias actifs sont réajoutés (cette commande efface les adresses manuelles).
 - **DNS** : `set dnsservers source=static` puis `add dnsservers` pour les suivants ; retour à `source=dhcp` lors d'un retour DHCP. Ces commandes n'ont pas de `store=active` : le DNS statique est **persistant**. Il est normalement restauré à la fermeture, mais après un crash suivi d'un reboot sans relancer l'application, il peut rester statique : relance FastIpSwitch ou remets-le manuellement.
 - **Rafraîchissement et APIPA** : la sélection d'un adaptateur relit l'état réel. Les adresses `169.254.x.x` (APIPA/link-local) sont ignorées : elles signifient « pas de bail DHCP ». Le champ IP reste vide avec un message, et une vérification toutes les 2 s le remplit quand le bail arrive ; si l'adaptateur courant tombe, l'app bascule vers un adaptateur nouvellement exploitable (sauf si tu as explicitement choisi un adaptateur déconnecté pour le configurer).
-- **Validation** : `.0` et `.255` refusés pour un /24 (réseau/diffusion), passerelle obligatoirement dans le même sous-réseau, doublons refusés, DNS IPv4 valides.
+- **Validation** : `.0` et `.255` refusés pour un /24 (réseau/diffusion), préfixes plus courts que `/8` refusés, passerelle obligatoirement dans le même sous-réseau, doublons refusés, DNS IPv4 valides.
 
 ## Redémarrage, fermeture et récupération sous Windows
 
@@ -149,9 +149,13 @@ Binaire : `target\release\fastipswitch.exe`. `.cargo/config.toml` active `+crt-s
 
 ## Linux
 
-Le portage Linux partage la même interface Slint et le même modèle « adresse principale + IP virtuelles ». C'est un premier portage : couvert par des tests unitaires et un build CI, mais sans matrice de validation matérielle/bureau publiée. **Le comportement Windows est inchangé.** Le guide détaillé (architecture, matrice des commandes, développement, CI) est dans [`docs/linux.fr.md`](docs/linux.fr.md).
+Le portage Linux partage la même interface Slint et le même modèle « adresse principale + IP virtuelles ». C'est un premier portage : couvert par des tests unitaires et un build CI, mais sans matrice de validation matérielle/bureau publiée. **Le backend et le déroulé Windows sont inchangés.** Le guide détaillé (architecture, matrice des commandes, développement, CI) est dans [`docs/linux.fr.md`](docs/linux.fr.md).
 
-NetworkManager est recommandé : les installations de bureau Debian, Ubuntu et Linux Mint l'utilisent par défaut. Sans NetworkManager, la lecture et les alias fonctionnent quand même via `ip` ; l'adresse principale et la passerelle passent alors par des commandes `ip` volatiles, et le DNS exige `resolvectl`.
+NetworkManager est recommandé : les installations de bureau Debian, Ubuntu et Linux Mint l'utilisent par défaut. Le repli dépend de l'état exact rapporté par NetworkManager :
+
+- **gérée et `connected`** : adresse principale, DHCP et DNS passent par `nmcli` ;
+- **NetworkManager tourne mais ne gère pas l'interface** (`connected (externally)`, `unmanaged`, `disconnected`, tout état autre que `connected`) : l'adresse statique et le retour DHCP sont **refusés** pour ne pas détruire une configuration externe (networkd, ifupdown…) ; les alias passent toujours par `ip` et les changements DNS par `resolvectl` s'il est présent ;
+- **aucun NetworkManager** : l'adresse statique passe par `ip` avec une sauvegarde/restauration en cas d'échec ; le retour DHCP exige `networkctl` (systemd-networkd) et est refusé avant toute modification sinon. Si `networkctl reconfigure` échoue, la configuration précédente est restaurée et l'erreur remonte, sans faux succès.
 
 ### Installer le `.deb` (Debian, Ubuntu, Linux Mint)
 
@@ -162,14 +166,14 @@ packaging/build-deb.sh
 sudo apt install ./packaging/.build/dist/fastipswitch_0.1.0_amd64.deb
 ```
 
-Le paquet installe la GUI dans `/usr/bin/fastipswitch`, le helper dans `/usr/libexec/fastipswitch/fastipswitch-helper` (root:root, `0755`), l'action polkit `/usr/share/polkit-1/actions/org.talevinn.fastipswitch.policy`, l'entrée de bureau, les icônes hicolor, la page de manuel et les métadonnées AppStream.
+Le paquet installe la GUI dans `/usr/bin/fastipswitch`, le helper dans `/usr/libexec/fastipswitch/fastipswitch-helper` (root:root, `0755`), l'action polkit `/usr/share/polkit-1/actions/org.talevinn.fastipswitch.policy`, l'entrée de bureau, les icônes hicolor, la page de manuel et les métadonnées AppStream. Le build valide la policy (chemin du helper, XML via `xmllint` s'il est installé) et **exige** `dpkg-deb --root-owner-group` ; il s'arrête sinon.
 
 Dépendances d'exécution :
 
 - `iproute2` — indispensable pour la lecture (`ip -j`) et les alias (`ip addr`) ;
 - `pkexec | policykit-1` — indispensable pour l'élévation (sur Debian 12/Ubuntu 24.04, `pkexec` est un paquet à part) ;
 - `network-manager` — en **Recommends**, installé par défaut par `apt`, nécessaire au chemin `nmcli` ;
-- les bibliothèques graphiques listées dans `packaging/deb/DEBIAN/control` (fontconfig, freetype, xkbcommon, Wayland/X11, EGL/GL).
+- les bibliothèques graphiques listées dans `packaging/deb/DEBIAN/control` : fontconfig, freetype, xkbcommon, Wayland/X11 (y compris les bibliothèques clientes X11), EGL/GL.
 
 Le `.deb` n'est **pas signé** et aucun dépôt APT n'est fourni. Il n'y a **pas d'AppImage** : le helper et la policy polkit doivent être installés au niveau système, ce qu'un fichier portable unique ne fait pas.
 
@@ -186,38 +190,40 @@ cargo build --release
 
 `libfreetype-dev` existe sur Debian 12+ et Ubuntu 24.04 ; utilise `libfreetype6-dev` sur les versions plus anciennes. Ajoute `libx11-xcb-dev` pour compiler et lancer sous X11. Binaires : `target/release/fastipswitch` et `target/release/fastipswitch-helper`.
 
-Le helper doit être à un emplacement système pour l'usage normal. Le bouton d'installation de l'application ne gère qu'une copie par utilisateur (`~/.local/bin`, icônes, entrée de bureau, autostart XDG optionnel) et n'installe jamais le helper : utilise le `.deb` pour une élévation fonctionnelle.
+Le helper doit être à un emplacement système pour l'usage normal. Le bouton d'installation de l'application ne gère qu'une copie par utilisateur (`~/.local/bin`, icônes, entrée de bureau, autostart XDG optionnel) et n'installe jamais le helper : utilise le `.deb` pour une élévation fonctionnelle. Si `/usr/bin/fastipswitch` existe (paquet système), il ne copie ni ne modifie `/usr/bin` et ne gère que l'entrée d'autostart.
 
 ### Utilisation sous Linux
 
-1. Choisir l'interface. Le loopback et les interfaces de conteneurs/ponts (`docker*`, `veth*`, `virbr*`, `vmnet*`, `br-*`) sont masqués ; les VPN (`tun*`, `wg*`, …) sont conservés.
-2. **Adresse principale** : saisir un CIDR, la passerelle et le DNS si besoin, puis **Appliquer**. Avec NetworkManager, l'app lance `nmcli device modify <if> ipv4.method manual ipv4.addresses <cidr> ipv4.gateway <gw>` : cela modifie la configuration **active** uniquement, le profil sur disque n'est pas réécrit.
+1. Choisir l'interface. Le loopback et les interfaces de conteneurs/ponts (`docker*`, `veth*`, `virbr*`, `vmnet*`, `br-*`) sont masqués **et refusés par le helper** ; les VPN (`tun*`, `wg*`, …) sont conservés.
+2. **Adresse principale** : saisir un CIDR, la passerelle et le DNS si besoin, puis **Appliquer**. Les préfixes plus courts que `/8` sont refusés, ainsi que les adresses réseau/broadcast.
 3. **IP virtuelles** : `+`, saisir un CIDR, activer la ligne. Les alias passent toujours par `ip -4 addr add <cidr> dev <if>` et coexistent avec DHCP.
-4. **DNS** : appliqué séparément de l'adresse (un échec DNS n'annule pas le changement d'adresse). Avec NetworkManager : `ipv4.dns` et `ipv4.ignore-auto-dns yes` ; sinon `resolvectl dns <if> …`.
-5. **DHCP** : le retour lance `nmcli connection up <uuid>`, ce qui efface les surcharges transitoires et réactive le profil enregistré. Sans NetworkManager, les adresses et la route par défaut sont vidées et `networkctl reconfigure` est appelé s'il est présent.
-6. **Quitter** (ou fermer la fenêtre) retire les alias enregistrés dans la session, remet DHCP et réinitialise le DNS. Si la restauration échoue, l'app reste ouverte et affiche l'erreur. La fermeture de fenêtre quitte au lieu de masquer : le tray n'est pas garanti sur tous les bureaux.
-7. Une seule instance : un `flock` dans `$XDG_RUNTIME_DIR` ; un second lancement s'arrête et affiche un message sur stderr.
+4. **DNS** : appliqué séparément de l'adresse. Avec une connexion NetworkManager gérée : `ipv4.dns` et `ipv4.ignore-auto-dns yes` ; sinon `resolvectl dns <if> …` (obligatoire). Un échec DNS n'annule pas l'adresse et n'arme pas le nettoyage DNS : quitter n'effacera pas une configuration DNS existante.
+5. **DHCP** : avec une connexion NetworkManager gérée, le retour lance `nmcli connection up <uuid>`, ce qui efface les surcharges transitoires. Si NetworkManager tourne mais ne gère pas l'interface, le retour est refusé. Sans NetworkManager, le retour exige `networkctl` ; si `networkctl reconfigure` échoue, les adresses et routes précédentes sont restaurées et l'erreur remonte.
+6. **Quitter** (ou fermer la fenêtre) retire les alias enregistrés dans la session, remet DHCP et, seulement si le DNS a réellement été appliqué, réinitialise le DNS. Si la restauration échoue, l'app reste ouverte et affiche l'erreur. La fermeture de fenêtre quitte au lieu de masquer : le tray n'est pas garanti sur tous les bureaux.
+7. Une seule instance : un `flock` dans `$XDG_RUNTIME_DIR` ; un second lancement s'arrête et affiche un message sur stderr. Une session temporaire est liée à une interface : tant qu'elle est active, les opérations sur une autre interface sont refusées (termine par DHCP/Quitter ou sélectionne cette interface). La récupération après crash conserve la session si l'interface est absente ou si la lecture échoue.
 
-Résumé des commandes utilisées :
+Commandes réellement utilisées :
 
-| Action | NetworkManager (recommandé) | Repli (non géré par NM) |
-|---|---|---|
-| Lecture | `ip -j addr/link/route`, `nmcli connection show --active`, `nmcli -g IP4.DNS device show <if>` | mêmes lectures `ip` ; `connection`/DNS vides |
-| Adresse statique | `nmcli device modify <if> ipv4.method manual …` | `ip -4 addr flush … scope global`, `ip -4 addr add`, `ip route replace default via …` |
-| DHCP | `nmcli connection up <uuid>` | flush adresse + route par défaut, `networkctl reconfigure` |
-| DNS | `nmcli device modify <if> ipv4.dns … ipv4.ignore-auto-dns yes` | `resolvectl dns` / `resolvectl revert` |
-| Alias | `ip -4 addr add/del` (toujours) | `ip -4 addr add/del` (toujours) |
+| Action | NetworkManager `connected` | NM présent, interface non gérée | Aucun NetworkManager |
+|---|---|---|---|
+| Lecture | `ip -j addr/link/route`, `nmcli connection show --active`, `nmcli -g IP4.DNS device show <if>` | mêmes lectures `ip` ; `connection` vide, DNS lu vide (écriture DNS via `resolvectl`) | mêmes lectures `ip` ; aucune donnée NM |
+| Adresse statique | `nmcli device modify <if> ipv4.method manual …` | **refusée** (aucune commande destructive) | `ip` avec instantané : flush/add, restauration si échec |
+| Passerelle | `ipv4.gateway` via nmcli | — | posée seulement si l'interface a déjà une route par défaut ou s'il n'en existe aucune ; sinon ignorée. Métrique existante conservée ; une route nouvellement créée utilise la métrique 1000 |
+| DHCP | `nmcli connection up <uuid>` | **refusé** | `networkctl` obligatoire ; sauvegarde, flush, reconfigure, restauration si échec |
+| DNS | `nmcli device modify <if> ipv4.dns … ipv4.ignore-auto-dns yes` | `resolvectl dns` / `revert` | `resolvectl dns` / `revert` |
+| Alias | `ip -4 addr add/del` | `ip -4 addr add/del` | `ip -4 addr add/del` |
 
 ### Élévation sous Linux
 
 La GUI tourne sans privilèges et n'obtient jamais root elle-même ; il n'y a pas d'écran « droits administrateur requis » grisé : toute l'interface reste utilisable et chaque modification passe par le helper, avec une seule demande de mot de passe réutilisée quelques minutes.
 
-- L'app sérialise une requête en JSON et lance `pkexec /usr/libexec/fastipswitch/fastipswitch-helper`.
-- L'action polkit est `org.talevinn.fastipswitch.network` ; `allow_any` et `allow_inactive` sont à `auth_admin`, `allow_active` à `auth_admin_keep` : une seule demande de mot de passe est réutilisée pendant environ cinq minutes.
-- Le helper revalide tout avant de toucher au réseau : version du protocole, interface existante dans `/sys/class/net` et différente de `lo`, longueur/caractères du nom, invariants du CIDR, passerelle dans le même sous-réseau, au plus 4 serveurs DNS unicast. Il ne fait jamais confiance à la GUI.
+- L'app sérialise une requête en JSON et lance `pkexec /usr/libexec/fastipswitch/fastipswitch-helper` (`/usr/bin/pkexec` s'il existe, sinon `pkexec` du `PATH`).
+- L'action polkit est `org.talevinn.fastipswitch.network` ; `allow_any` et `allow_inactive` sont à `no`, `allow_active` à `auth_admin_keep` : l'élévation est limitée à la session locale active (aucun prompt depuis SSH ou une session inactive), et une seule demande de mot de passe est réutilisée pendant environ cinq minutes pour le processus appelant. Le prompt est générique et n'affiche ni l'interface ni l'IP modifiée.
+- Le helper revalide tout avant de toucher au réseau : version du protocole, interface existante dans `/sys/class/net` et différente de `lo`, interfaces virtuelles (`docker*`, `veth*`, `virbr*`, `vmnet*`, `br-*`) refusées, longueur/caractères du nom, invariants du CIDR avec un minimum `/8`, passerelle dans le même sous-réseau, au plus 4 serveurs DNS unicast. Il ne fait jamais confiance à la GUI.
+- La requête sur stdin du helper est plafonnée à 64 Kio et doit être de l'UTF-8 valide.
 - Les commandes sont exécutées sans shell, avec des arguments séparés.
 - Une demande annulée (code 126) ou une autorisation refusée (127) ne change rien et est signalée dans l'interface.
-- En release, seul `/usr/libexec/fastipswitch/fastipswitch-helper` est accepté ; `FASTIPSWITCH_HELPER` et un helper voisin de la GUI ne sont pris en compte qu'en debug (développement).
+- En release, seul `/usr/libexec/fastipswitch/fastipswitch-helper` est accepté ; `FASTIPSWITCH_HELPER` et un helper voisin de la GUI ne sont pris en compte qu'en debug. `FASTIPSWITCH_DRY_RUN` aussi.
 
 ### Fichiers sous Linux
 
@@ -226,36 +232,40 @@ La GUI tourne sans privilèges et n'obtient jamais root elle-même ; il n'y a pa
 | `~/.config/fastipswitch/state.toml` | interface choisie, liste d'IP virtuelles, dernier IP/passerelle/DNS |
 | `~/.local/state/fastipswitch/session.toml` | trace de récupération après crash |
 | `~/.local/state/fastipswitch/fastipswitch.log` | journal des commandes (rotation en `.log.1` au-delà de 1 Mo) |
-| `$XDG_RUNTIME_DIR/fastipswitch-<uid>.{lock,pid,sock}` | verrou d'instance unique et PID (socket réservé à une activation future) |
+| `$XDG_RUNTIME_DIR/fastipswitch-<uid>.{lock,pid,sock}` | verrou d'instance unique et PID (socket réservé à une activation future) ; sans `XDG_RUNTIME_DIR`, `/tmp/fastipswitch-<uid>/` (`0700`) est utilisé |
 | `~/.local/bin/fastipswitch` | installation par utilisateur depuis l'interface, si utilisée |
 | `~/.config/autostart/fastipswitch.desktop` | autostart XDG, seulement s'il est activé dans la boîte d'installation |
 | `data/` à côté de l'exécutable | mode portable si ce dossier est accessible en écriture (comme sous Windows) |
 
-`XDG_CONFIG_HOME`, `XDG_STATE_HOME`, `XDG_DATA_HOME` et `XDG_RUNTIME_DIR` sont respectés. `apt remove fastipswitch` ne retire que les fichiers système ; les fichiers utilisateur ci-dessus sont conservés.
+`XDG_CONFIG_HOME`, `XDG_STATE_HOME`, `XDG_DATA_HOME` et `XDG_RUNTIME_DIR` sont respectés ; les valeurs XDG relatives sont ignorées. Les répertoires de configuration/état sont créés en `0700`, et `state.toml`, `session.toml` et le journal sont en `0600`. `apt remove fastipswitch` ne retire que les fichiers système ; les fichiers utilisateur ci-dessus sont conservés.
 
 ### Limites sous Linux
 
 - **Tray sous GNOME** : l'icône utilise le protocole StatusNotifierItem/AppIndicator ; GNOME demande l'extension AppIndicator. Sans elle, utilise la fenêtre (sa fermeture quitte proprement).
-- **NetworkManager recommandé** : les interfaces non gérées reçoivent des changements `ip` volatils que le système peut écraser ; le DNS exige alors `resolvectl` (systemd-resolved). Pas d'intégration complète à systemd-networkd.
+- **L'état NetworkManager compte** : si NetworkManager est installé mais ne rapporte pas l'interface comme `connected` (`connected (externally)`, `unmanaged`, `disconnected`), l'adresse statique et le retour DHCP sont refusés par conception ; les alias fonctionnent toujours et les changements DNS passent par `resolvectl`. Si `nmcli device status` échoue lui-même, le helper bascule sur le chemin sans NetworkManager.
+- **Pas de backend systemd-networkd complet** : sans NetworkManager, l'adressage statique est un instantané `ip` volatil (restauré en cas d'échec), et le retour DHCP exige `networkctl` ; sans lui, le retour est refusé avant toute modification.
+- **Passerelle en repli `ip`** : elle n'est posée que si l'interface a déjà une route par défaut (métrique conservée) ou s'il n'en existe aucune (métrique 1000). Si une autre interface possède l'unique route par défaut, la passerelle est ignorée avec un avertissement sur stderr du helper.
 - **Alias volatils** : ils sont ajoutés avec `ip` même sur les interfaces NM et peuvent disparaître quand NetworkManager réapplique ou change le profil ; réactive-les.
 - **Pas d'AppImage**, ni Flatpak/Snap, ni dépôt signé : `.deb` uniquement.
-- Pas de gestion des routes statiques ni d'IPv6 (IPv4 uniquement, comme sous Windows).
-- Une seule instance à la fois ; les données sont par utilisateur.
+- Pas de gestion des routes statiques ni d'IPv6 (IPv4 uniquement, comme sous Windows). Les préfixes plus courts que `/8` et les noms d'interfaces virtuelles sont refusés.
+- Une seule instance à la fois ; une session temporaire est liée à une interface, et la session de récupération est conservée si cette interface est absente ou illisible.
 - La détection du thème dépend de `gsettings`, `xfconf-query` ou `kreadconfig` ; repli sur le thème clair.
-- pkexec a besoin d'un agent d'authentification polkit, normalement fourni par la session de bureau.
+- pkexec a besoin d'un agent polkit et d'une **session locale active** ; l'élévation depuis SSH ou une session inactive est refusée par la policy. L'autorisation est conservée environ cinq minutes pour le processus appelant, et le prompt est générique (ni interface ni IP affichée).
 
 ### Dépannage sous Linux
 
 1. **Voir ce que l'app lit** : `fastipswitch --print-adapters` affiche une ligne par interface (`name`, `index`, `mac`, `up`, `dhcp`, `gw`, `dns`, `conn`, adresses) puis quitte ; lecture seule.
 2. **Lire le journal** : `~/.local/state/fastipswitch/fastipswitch.log` (ou `data/fastipswitch.log` en mode portable). Les appels `ip`/`nmcli` et les échecs du helper y sont écrits.
-3. **Vérifier NetworkManager** : `nmcli device status` (l'interface est-elle `connected` ou `unmanaged` ?) et `nmcli -t -f UUID,DEVICE connection show --active` (UUID utilisé par le retour DHCP).
-4. **Vérifier l'élévation** : `pkexec /usr/libexec/fastipswitch/fastipswitch-helper </dev/null` doit demander le mot de passe puis renvoyer une erreur JSON (requête vide). « Non autorisé » ou aucune demande signifie souvent policy absente ou contournée : réinstalle le `.deb`. Selon la distribution, les refus polkit/pkexec sont dans `journalctl -b` ou le journal d'authentification.
+3. **Vérifier NetworkManager** : `nmcli device status` (l'interface est-elle exactement `connected`, ou `unmanaged`/`connected (externally)`/`disconnected` ?) et `nmcli -t -f UUID,DEVICE connection show --active` (UUID utilisé par le retour DHCP). Un état autre que `connected` explique un refus d'adresse statique ou de retour DHCP.
+4. **Vérifier l'élévation** : `pkexec /usr/libexec/fastipswitch/fastipswitch-helper </dev/null` doit demander le mot de passe (session locale active uniquement) puis renvoyer une erreur JSON (requête vide). « Non autorisé » ou aucune demande peut signifier policy absente, session non locale/inactive ou agent polkit absent. Selon la distribution, les refus sont dans `journalctl -b` ou le journal d'authentification.
 5. **Helper introuvable** : vérifie `ls -l /usr/libexec/fastipswitch/fastipswitch-helper` ; en développement, définis `FASTIPSWITCH_HELPER` vers son chemin.
-6. **Restaurer manuellement** :
+6. **Passerelle ignorée** : en repli `ip`, cela arrive quand une autre interface possède l'unique route par défaut. L'adresse est quand même appliquée ; l'avertissement est sur stderr du helper. Utilise `ip route show default` pour inspecter les métriques.
+7. **Session temporaire sur une autre interface** : termine-la par DHCP/Quitter ou sélectionne l'interface indiquée dans le message.
+8. **Restaurer manuellement** :
    ```sh
    # NetworkManager : réactive le profil enregistré (efface aussi les surcharges)
    nmcli connection up <uuid>
-   # sans NetworkManager
+   # sans NetworkManager (seulement si systemd-networkd gère l'interface)
    sudo ip -4 addr flush dev <if> scope global
    sudo ip route flush default dev <if>
    sudo networkctl reconfigure <if>
@@ -264,7 +274,8 @@ La GUI tourne sans privilèges et n'obtient jamais root elle-même ; il n'y a pa
    # retirer un alias
    sudo ip -4 addr del <cidr> dev <if>
    ```
-7. **Désinstaller** : `sudo apt remove fastipswitch` (ou `apt purge`). La configuration et les journaux utilisateur ne sont pas supprimés ; efface `~/.config/fastipswitch` et `~/.local/state/fastipswitch` pour repartir de zéro.
+   Si `networkctl reconfigure` échoue, réapplique les adresses/routes précédentes depuis le journal ou le profil enregistré de ta distribution ; ne laisse pas l'interface sans configuration.
+9. **Désinstaller** : `sudo apt remove fastipswitch` (ou `apt purge`). La configuration et les journaux utilisateur ne sont pas supprimés ; efface `~/.config/fastipswitch` et `~/.local/state/fastipswitch` pour repartir de zéro.
 
 ### Voir aussi
 
