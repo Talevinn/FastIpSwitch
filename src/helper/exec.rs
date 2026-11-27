@@ -85,7 +85,13 @@ fn set_dhcp(ifname: &str) -> Result<(), String> {
     run_ok(IP, &ip_flush_global_args(ifname))?;
     run_ok(IP, &ip_route_flush_default_args(ifname))?;
     if have_program(NETWORKCTL) {
-        run_ok(NETWORKCTL, &networkctl_reconfigure_args(ifname))?;
+        // `networkctl` peut exister sans que systemd-networkd soit actif (ou
+        // sans gérer cette interface). Le nettoyage des adresses est déjà
+        // fait : on ne transforme pas cet échec en erreur bloquante, sinon
+        // l'interface resterait sans configuration tout en affichant un échec.
+        if let Err(e) = run_ok(NETWORKCTL, &networkctl_reconfigure_args(ifname)) {
+            eprintln!("fastipswitch-helper: networkctl reconfigure {ifname} ignoré : {e}");
+        }
     }
     Ok(())
 }
