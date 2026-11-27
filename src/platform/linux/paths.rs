@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Valentin PICARD
 
+//! Chemins de données Linux (XDG) et mode portable.
+
+use std::ffi::OsStr;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 /// Mode portable : si un dossier `data` peut être créé/écrit à côté de
@@ -28,28 +31,99 @@ fn portable_dir() -> Option<&'static PathBuf> {
 
 fn home() -> PathBuf {
     std::env::var_os("HOME")
+        .filter(|value| !value.is_empty())
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-fn xdg_dir(var: &str, fallback: &str) -> PathBuf {
-    std::env::var_os(var)
+/// Résout un répertoire de base XDG : une valeur absolue non vide prioritaire,
+/// sinon `<home>/<fallback>`. Fonction pure pour rester testable sans muter
+/// l'environnement du processus (interdit en edition 2024).
+fn xdg_base(value: Option<&OsStr>, home: &Path, fallback: &str) -> PathBuf {
+    value
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| home().join(fallback))
-        .join("fastipswitch")
+        .unwrap_or_else(|| home.join(fallback))
+}
+
+/// `$XDG_CONFIG_HOME` (défaut `~/.config`), sans sous-dossier applicatif.
+pub fn config_home() -> PathBuf {
+    let value = std::env::var_os("XDG_CONFIG_HOME");
+    xdg_base(value.as_deref(), &home(), ".config")
+}
+
+/// `$XDG_STATE_HOME` (défaut `~/.local/state`), sans sous-dossier applicatif.
+fn state_home() -> PathBuf {
+    let value = std::env::var_os("XDG_STATE_HOME");
+    xdg_base(value.as_deref(), &home(), ".local/state")
+}
+
+/// `$XDG_DATA_HOME` (défaut `~/.local/share`), sans sous-dossier applicatif.
+pub fn data_home() -> PathBuf {
+    let value = std::env::var_os("XDG_DATA_HOME");
+    xdg_base(value.as_deref(), &home(), ".local/share")
+}
+
+/// `$XDG_RUNTIME_DIR` (défaut `/tmp`) : verrou d'instance, PID et socket.
+pub fn runtime_dir() -> PathBuf {
+    let value = std::env::var_os("XDG_RUNTIME_DIR");
+    value
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("/tmp"))
 }
 
 /// Préférences et liste d'alias : `$XDG_CONFIG_HOME/fastipswitch`.
 pub fn config_dir() -> PathBuf {
     portable_dir()
         .cloned()
-        .unwrap_or_else(|| xdg_dir("XDG_CONFIG_HOME", ".config"))
+        .unwrap_or_else(|| config_home().join("fastipswitch"))
 }
 
 /// Session de récupération et journal : `$XDG_STATE_HOME/fastipswitch`.
 pub fn local_dir() -> PathBuf {
     portable_dir()
         .cloned()
-        .unwrap_or_else(|| xdg_dir("XDG_STATE_HOME", ".local/state"))
+        .unwrap_or_else(|| state_home().join("fastipswitch"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn path(value: &str) -> PathBuf {
+        PathBuf::from(value)
+    }
+
+    #[test]
+    fn xdg_valeur_prioritaire() {
+        let home = path("/home/test");
+        assert_eq!(
+            xdg_base(Some(OsStr::new("/tmp/cfg")), &home, ".config"),
+            path("/tmp/cfg")
+        );
+        assert_eq!(
+            xdg_base(Some(OsStr::new("/tmp/state")), &home, ".local/state"),
+            path("/tmp/state")
+        );
+    }
+
+    #[test]
+    fn xdg_repli_sur_home() {
+        let home = path("/home/test");
+        assert_eq!(xdg_base(None, &home, ".config"), path("/home/test/.config"));
+        assert_eq!(
+            xdg_base(None, &home, ".local/share"),
+            path("/home/test/.local/share")
+        );
+    }
+
+    #[test]
+    fn xdg_valeur_vide_ignoree() {
+        let home = path("/home/test");
+        assert_eq!(
+            xdg_base(Some(OsStr::new("")), &home, ".config"),
+            path("/home/test/.config")
+        );
+    }
 }
