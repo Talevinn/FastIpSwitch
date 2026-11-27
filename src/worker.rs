@@ -148,6 +148,16 @@ impl Session {
     }
 }
 
+/// Refuse une opération sur une autre interface que celle de la session en
+/// cours : sinon un changement automatique d'adaptateur ferait supprimer les
+/// adresses de la session sur la mauvaise interface.
+fn ensure_session_iface(session: &Session, id: &IfaceId) -> Result<(), String> {
+    if !session.is_empty() && !session.ifname.is_empty() && session.ifname != id.name {
+        return Err(crate::i18n::tr().session_other_iface(&session.ifname));
+    }
+    Ok(())
+}
+
 fn refresh(tx: &Sender<Event>) {
     match platform::read_adapters() {
         Ok(adapters) => {
@@ -171,6 +181,7 @@ fn add_alias(
     is_new: bool,
 ) -> Result<(), String> {
     let previous = session.lock().unwrap().clone();
+    ensure_session_iface(&previous, &adapter.id)?;
 
     {
         let mut s = session.lock().unwrap();
@@ -264,6 +275,7 @@ fn remove_alias_inner(
     remove_row: bool,
 ) -> Result<(), String> {
     let backend = platform::backend();
+    ensure_session_iface(&session.lock().unwrap(), &adapter.id)?;
 
     if let Err(e) = backend.delete_address(&adapter.id, cidr) {
         // La ligne reste dans la liste, mais on la débloque.
@@ -311,6 +323,7 @@ fn apply_static(
     tx: &Sender<Event>,
 ) -> Result<(), String> {
     let previous = session.lock().unwrap().clone();
+    ensure_session_iface(&previous, &adapter.id)?;
 
     {
         let mut s = session.lock().unwrap();
@@ -340,10 +353,18 @@ fn apply_static(
     }
 
     let mut warnings = Vec::new();
-    if !dns.is_empty()
-        && let Err(e) = backend.set_dns_static(&adapter.id, dns)
-    {
-        warnings.push(format!("DNS : {e}"));
+    if !dns.is_empty() {
+        match backend.set_dns_static(&adapter.id, dns) {
+            Ok(()) => {}
+            Err(e) => {
+                // Les DNS n'ont pas été appliqués : ne pas les réinitialiser
+                // au quit, sous peine d'effacer une configuration existante.
+                let mut s = session.lock().unwrap();
+                s.dns_set = false;
+                store::save_session(&s);
+                warnings.push(format!("DNS : {e}"));
+            }
+        }
     }
     for alias in aliases {
         if let Err(e) = backend.add_address(&adapter.id, alias) {
@@ -389,6 +410,9 @@ fn restore_defaults(
     tx: &Sender<Event>,
 ) -> Result<(), String> {
     let snapshot = session.lock().unwrap().clone();
+    if !snapshot.ifname.is_empty() && snapshot.ifname != id.name {
+        return Err(crate::i18n::tr().session_other_iface(&snapshot.ifname));
+    }
     let backend = platform::backend();
 
     let mut addresses = snapshot.applied.clone();
@@ -457,7 +481,8 @@ pub fn recover_pending(adapters: &[AdapterInfo]) -> Option<String> {
             false
         }
     }) else {
-        store::clear_session();
+        // Ne pas effacer la session : l'interface peut revenir (NIC USB,
+        // MAC temporaire, lecture transitoirement incomplète).
         return Some(crate::i18n::tr().recover_missing_adapter().to_string());
     };
 

@@ -180,6 +180,13 @@ fi
 
 # Policy polkit : fournie par packaging/polkit/, indispensable à pkexec.
 if [ -f "$POLICY_SRC" ]; then
+    # Une policy erronée (mauvais chemin, autorisation trop large) est pire
+    # qu'une policy absente : on la valide avant de l'embarquer.
+    if command -v xmllint >/dev/null 2>&1; then
+        xmllint --noout "$POLICY_SRC" || die "policy polkit XML invalide : $POLICY_SRC"
+    fi
+    grep -q '/usr/libexec/fastipswitch/fastipswitch-helper' "$POLICY_SRC" ||
+        die "la policy polkit ne cible pas /usr/libexec/fastipswitch/fastipswitch-helper"
     install -D -m 0644 "$POLICY_SRC" \
         "$STAGE_DIR/usr/share/polkit-1/actions/$POLICY_NAME"
 else
@@ -221,7 +228,9 @@ if dpkg-deb --help 2>/dev/null | grep -q -- '--root-owner-group'; then
     # Tous les fichiers appartiennent à root:root dans l'archive.
     DPKG_ARGS+=(--root-owner-group)
 else
-    warn "dpkg-deb sans --root-owner-group : propriétaires de l'archive non forcés"
+    # Sans cette option, le helper pourrait appartenir à l'UID du build et
+    # être remplacé par un utilisateur local, puis exécuté en root via pkexec.
+    die "dpkg-deb ne prend pas en charge --root-owner-group : mise à jour de dpkg requise"
 fi
 
 mkdir -p "$DIST_DIR"

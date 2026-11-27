@@ -10,7 +10,7 @@
 
 use std::io::ErrorKind;
 use std::net::Ipv4Addr;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 use serde::Deserialize;
 
@@ -50,16 +50,19 @@ fn apply_static(
     gateway: Option<Ipv4Addr>,
     dns: &[Ipv4Addr],
 ) -> Result<(), String> {
-    if nm_connected(ifname) {
-        // `device modify` ne modifie que la configuration active : le profil
-        // NetworkManager sur disque n'est pas persisté.
-        run_ok(NMCLI, &nmcli_apply_args(ifname, cidr, gateway))?;
-    } else {
-        run_ok(IP, &ip_flush_global_args(ifname))?;
-        run_ok(IP, &ip_add_addr_args(ifname, cidr))?;
-        if let Some(gateway) = gateway {
-            run_ok(IP, &ip_route_replace_default_args(ifname, gateway))?;
+    match nm_state(ifname) {
+        NmState::Connected => {
+            // `device modify` ne modifie que la configuration active : le
+            // profil NetworkManager sur disque n'est pas persisté.
+            run_ok(NMCLI, &nmcli_apply_args(ifname, cidr, gateway))?;
         }
+        NmState::PresentUnmanaged => {
+            return Err(format!(
+                "{ifname} n'est pas gérée par NetworkManager : modification refusée \
+                 pour ne pas casser une configuration externe (networkd, ifupdown…)"
+            ));
+        }
+        NmState::Absent => apply_static_fallback(ifname, cidr, gateway)?,
     }
 
     // Le protocole transporte aussi les DNS dans ApplyStatic, même si
@@ -75,23 +78,47 @@ fn apply_static(
 // ---------------------------------------------------------------------------
 
 fn set_dhcp(ifname: &str) -> Result<(), String> {
-    if nm_connected(ifname) {
-        // Réactiver le profil persistant efface les overrides temporaires
-        // (adresse statique, passerelle) et relance DHCP s'il est configuré.
-        let uuid = nm_active_connection(ifname)?;
-        return run_ok(NMCLI, &nmcli_connection_up_args(&uuid)).map(|_| ());
+    match nm_state(ifname) {
+        NmState::Connected => {
+            // Réactiver le profil persistant efface les overrides temporaires
+            // (adresse statique, passerelle) et relance DHCP s'il est configuré.
+            let uuid = nm_active_connection(ifname)?;
+            return run_ok(NMCLI, &nmcli_connection_up_args(&uuid)).map(|_| ());
+        }
+        NmState::PresentUnmanaged => {
+            return Err(format!(
+                "{ifname} n'est pas gérée par NetworkManager : retour DHCP refusé \
+                 pour ne pas effacer une configuration externe"
+            ));
+        }
+        NmState::Absent => {}
     }
 
-    run_ok(IP, &ip_flush_global_args(ifname))?;
-    run_ok(IP, &ip_route_flush_default_args(ifname))?;
-    if have_program(NETWORKCTL) {
-        // `networkctl` peut exister sans que systemd-networkd soit actif (ou
-        // sans gérer cette interface). Le nettoyage des adresses est déjà
-        // fait : on ne transforme pas cet échec en erreur bloquante, sinon
-        // l'interface resterait sans configuration tout en affichant un échec.
-        if let Err(e) = run_ok(NETWORKCTL, &networkctl_reconfigure_args(ifname)) {
-            eprintln!("fastipswitch-helper: networkctl reconfigure {ifname} ignoré : {e}");
-        }
+    // Sans NetworkManager, seul systemd-networkd permet de relancer DHCP de
+    // façon fiable. Sans lui, on refuse AVANT de toucher aux adresses.
+    if !have_program(NETWORKCTL) {
+        return Err(
+            "retour DHCP impossible : ni NetworkManager ni systemd-networkd détecté ; \
+             configuration inchangée"
+                .into(),
+        );
+    }
+
+    let backup = capture_config(ifname)?;
+    let result = (|| -> Result<(), String> {
+        run_ok(IP, &ip_flush_global_args(ifname))?;
+        run_ok(IP, &ip_route_flush_default_args(ifname))?;
+        run_ok(NETWORKCTL, &networkctl_reconfigure_args(ifname))?;
+        Ok(())
+    })();
+
+    if let Err(e) = result {
+        // Ne jamais laisser l'interface sans adresse si la reconfigure échoue.
+        restore_config(ifname, &backup);
+        return Err(format!(
+            "{e} (configuration précédente restaurée : {})",
+            describe_backup(&backup)
+        ));
     }
     Ok(())
 }
@@ -178,15 +205,29 @@ fn address_present(ifname: &str, cidr: &Cidr) -> Result<bool, String> {
 // Détection NetworkManager
 // ---------------------------------------------------------------------------
 
-/// Une interface est considérée gérée par NetworkManager lorsqu'elle est
-/// listée `connected` par `nmcli device status`.
-fn nm_connected(ifname: &str) -> bool {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum NmState {
+    /// NetworkManager gère l'interface et elle est connectée.
+    Connected,
+    /// NetworkManager tourne mais ne gère pas cette interface : toute action
+    /// destructive est refusée.
+    PresentUnmanaged,
+    /// NetworkManager absent ou arrêté : fallback ip/systemd-networkd.
+    Absent,
+}
+
+fn nm_state(ifname: &str) -> NmState {
     if !have_program(NMCLI) {
-        return false;
+        return NmState::Absent;
     }
     match run(NMCLI, &nmcli_device_status_args()) {
         Ok(output) if output.status.success() => {
-            device_is_connected(&String::from_utf8_lossy(&output.stdout), ifname)
+            let status = String::from_utf8_lossy(&output.stdout);
+            if device_is_connected(&status, ifname) {
+                NmState::Connected
+            } else {
+                NmState::PresentUnmanaged
+            }
         }
         Ok(output) => {
             eprintln!(
@@ -194,13 +235,160 @@ fn nm_connected(ifname: &str) -> bool {
                  basculement sur ip/resolvectl",
                 stderr_lower(&output)
             );
-            false
+            NmState::Absent
         }
         Err(e) => {
             eprintln!("fastipswitch-helper: {e}, basculement sur ip/resolvectl");
-            false
+            NmState::Absent
         }
     }
+}
+
+fn nm_connected(ifname: &str) -> bool {
+    nm_state(ifname) == NmState::Connected
+}
+
+// ---------------------------------------------------------------------------
+// Fallback sans NetworkManager : sauvegarde/restauration
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Default)]
+struct ConfigBackup {
+    addresses: Vec<Cidr>,
+    /// (passerelle, métrique) des routes par défaut de l'interface.
+    routes: Vec<(Ipv4Addr, u32)>,
+}
+
+fn capture_config(ifname: &str) -> Result<ConfigBackup, String> {
+    let addr_json = run_ok(IP, &ip_show_addr_args(ifname))?;
+    let addresses = parse_ipv4_cidrs(&String::from_utf8_lossy(&addr_json.stdout))?;
+    let routes = default_routes()?
+        .into_iter()
+        .filter(|route| route.dev == ifname)
+        .filter_map(|route| {
+            route
+                .gateway
+                .parse::<Ipv4Addr>()
+                .ok()
+                .map(|gateway| (gateway, route.metric))
+        })
+        .collect();
+    Ok(ConfigBackup { addresses, routes })
+}
+
+fn restore_config(ifname: &str, backup: &ConfigBackup) {
+    for cidr in &backup.addresses {
+        let _ = run(IP, &ip_add_addr_args(ifname, cidr));
+    }
+    for (gateway, metric) in &backup.routes {
+        let _ = run(IP, &ip_route_replace_metric_args(ifname, *gateway, *metric));
+    }
+}
+
+fn describe_backup(backup: &ConfigBackup) -> String {
+    if backup.addresses.is_empty() && backup.routes.is_empty() {
+        "aucune adresse à restaurer".into()
+    } else {
+        let addrs = backup
+            .addresses
+            .iter()
+            .map(|cidr| cidr.to_string())
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!("adresses {addrs}")
+    }
+}
+
+fn apply_static_fallback(
+    ifname: &str,
+    cidr: &Cidr,
+    gateway: Option<Ipv4Addr>,
+) -> Result<(), String> {
+    let backup = capture_config(ifname)?;
+    let result = (|| -> Result<(), String> {
+        run_ok(IP, &ip_flush_global_args(ifname))?;
+        run_ok(IP, &ip_add_addr_args(ifname, cidr))?;
+        if let Some(gateway) = gateway {
+            apply_default_route(ifname, gateway)?;
+        }
+        Ok(())
+    })();
+
+    if let Err(e) = result {
+        restore_config(ifname, &backup);
+        return Err(format!(
+            "{e} (configuration précédente restaurée : {})",
+            describe_backup(&backup)
+        ));
+    }
+    Ok(())
+}
+
+/// Ajoute/remplace la route par défaut sans voler celle d'une autre interface.
+fn apply_default_route(ifname: &str, gateway: Ipv4Addr) -> Result<(), String> {
+    let routes = default_routes()?;
+    let existing = routes.iter().find(|route| route.dev == ifname);
+
+    if existing.is_none() && !routes.is_empty() {
+        eprintln!(
+            "fastipswitch-helper: passerelle {gateway} ignorée sur {ifname} : \
+             une autre route par défaut existe déjà"
+        );
+        return Ok(());
+    }
+
+    let metric = existing.map(|route| route.metric).unwrap_or(1000);
+    run_ok(IP, &ip_route_replace_metric_args(ifname, gateway, metric)).map(|_| ())
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct DefaultRoute {
+    #[serde(default)]
+    dst: String,
+    #[serde(default)]
+    dev: String,
+    #[serde(default)]
+    gateway: String,
+    #[serde(default)]
+    metric: u32,
+}
+
+fn default_routes() -> Result<Vec<DefaultRoute>, String> {
+    let output = run_ok(IP, &strings(&["-j", "route", "show", "default"]))?;
+    let json = String::from_utf8_lossy(&output.stdout);
+    if json.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let routes: Vec<DefaultRoute> = serde_json::from_str(&json)
+        .map_err(|e| format!("sortie de `ip -j route` illisible : {e}"))?;
+    Ok(routes
+        .into_iter()
+        .filter(|route| route.dst == "default")
+        .collect())
+}
+
+/// Extrait les CIDR IPv4 d'une sortie `ip -j -4 addr show`.
+fn parse_ipv4_cidrs(json: &str) -> Result<Vec<Cidr>, String> {
+    let links: Vec<IpLink> = serde_json::from_str(json)
+        .map_err(|e| format!("sortie de `ip -j addr` illisible : {e}"))?;
+    let mut out = Vec::new();
+    for link in links {
+        for info in link.addr_info {
+            if info.family != "inet" {
+                continue;
+            }
+            let Some(local) = info.local else {
+                continue;
+            };
+            let Ok(addr) = local.parse::<Ipv4Addr>() else {
+                continue;
+            };
+            if let Ok(cidr) = Cidr::new(addr, info.prefixlen) {
+                out.push(cidr);
+            }
+        }
+    }
+    Ok(out)
 }
 
 /// UUID de la connexion NetworkManager active pour l'interface.
@@ -285,10 +473,11 @@ fn ip_show_addr_args(ifname: &str) -> Vec<String> {
     strings(&["-j", "-4", "addr", "show", "dev", ifname])
 }
 
-fn ip_route_replace_default_args(ifname: &str, gateway: Ipv4Addr) -> Vec<String> {
+fn ip_route_replace_metric_args(ifname: &str, gateway: Ipv4Addr, metric: u32) -> Vec<String> {
     let gateway = gateway.to_string();
+    let metric = metric.to_string();
     strings(&[
-        "route", "replace", "default", "via", &gateway, "dev", ifname,
+        "route", "replace", "default", "via", &gateway, "dev", ifname, "metric", &metric,
     ])
 }
 
@@ -399,6 +588,12 @@ fn run(program: &str, args: &[String]) -> Result<Output, String> {
     );
     Command::new(program)
         .args(args)
+        // Forcer la locale : les comparaisons portent sur des chaînes
+        // anglaises (`connected`, `File exists`, …) et les messages
+        // d'erreur d'iproute2 sont traduits par strerror().
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
+        .stdin(Stdio::null())
         .output()
         .map_err(|e| match e.kind() {
             ErrorKind::NotFound => format!("programme introuvable : {program}"),
@@ -558,7 +753,7 @@ mod tests {
     #[test]
     fn route_args_target_the_interface() {
         assert_eq!(
-            ip_route_replace_default_args("eth0", ip("192.168.3.1")),
+            ip_route_replace_metric_args("eth0", ip("192.168.3.1"), 1000),
             vec![
                 "route",
                 "replace",
@@ -567,6 +762,8 @@ mod tests {
                 "192.168.3.1",
                 "dev",
                 "eth0",
+                "metric",
+                "1000",
             ]
         );
         assert_eq!(

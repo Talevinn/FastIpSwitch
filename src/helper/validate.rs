@@ -20,6 +20,10 @@ const IFNAME_MAX: usize = 15;
 /// Nombre maximal de serveurs DNS acceptés dans une requête.
 const DNS_MAX: usize = 4;
 
+/// Interfaces virtuelles masquées par l'interface : les accepter côté helper
+/// permettrait de casser un pont Docker/libvirt via une requête forgée.
+const HIDDEN_PREFIXES: &[&str] = &["docker", "veth", "virbr", "vmnet", "br-"];
+
 impl Operation {
     pub fn ifname(&self) -> &str {
         match self {
@@ -81,6 +85,12 @@ pub fn validate_ifname(name: &str) -> Result<(), String> {
     }
     if name == "lo" || name == "." || name == ".." {
         return Err(format!("interface non autorisée : {name}"));
+    }
+    if HIDDEN_PREFIXES
+        .iter()
+        .any(|prefix| name.starts_with(prefix))
+    {
+        return Err(format!("interface virtuelle non autorisée : {name}"));
     }
 
     // Le premier caractère ne peut pas être un option (`-`) ni un séparateur
@@ -195,6 +205,8 @@ mod tests {
             "-eth0",
             ".eth0",
             "@eth0",
+            "docker0",
+            "veth1234",
             long.as_str(),
         ] {
             assert!(

@@ -134,18 +134,17 @@ fn install_with(
     if user_install {
         fs::create_dir_all(&roots.install)
             .map_err(|e| io_error("création du répertoire", &roots.install, e))?;
-    }
 
-    if !same_file(source, target) {
-        fs::copy(source, target).map_err(|e| io_error("copie de l'exécutable vers", target, e))?;
-    }
+        if !same_file(source, target) {
+            fs::copy(source, target)
+                .map_err(|e| io_error("copie de l'exécutable vers", target, e))?;
+        }
 
-    // Les exécutables installés restent accessibles à tous, comme le binaire
-    // d'origine dans `target/`.
-    fs::set_permissions(target, fs::Permissions::from_mode(0o755))
-        .map_err(|e| io_error("changement de permissions de", target, e))?;
+        // Les exécutables installés restent accessibles à tous, comme le
+        // binaire d'origine dans `target/`.
+        fs::set_permissions(target, fs::Permissions::from_mode(0o755))
+            .map_err(|e| io_error("changement de permissions de", target, e))?;
 
-    if user_install {
         install_icons(roots)?;
         write_file(
             &roots.data.join("applications").join("fastipswitch.desktop"),
@@ -206,10 +205,17 @@ fn io_error(action: &str, path: &Path, error: std::io::Error) -> String {
 
 /// Échappe un chemin pour le champ `Exec=` d'un fichier `.desktop`.
 fn desktop_exec(path: &Path) -> String {
-    let raw = path.display().to_string();
+    // Les retours à la ligne casseraient le fichier .desktop et `%` est un
+    // code de champ (Desktop Entry Spec) : on neutralise les deux.
+    let raw = path
+        .display()
+        .to_string()
+        .replace(['\n', '\r'], " ")
+        .replace('%', "%%");
+
     if raw
         .chars()
-        .any(|c| c.is_whitespace() || c == '"' || c == '\'' || c == '\\')
+        .any(|c| c.is_whitespace() || c == '"' || c == '\'')
     {
         let escaped = raw.replace('\\', "\\\\").replace('"', "\\\"");
         format!("\"{escaped}\"")
@@ -347,6 +353,8 @@ mod tests {
             desktop_exec(Path::new("/home/a\"b/bin")),
             "\"/home/a\\\"b/bin\""
         );
+        // `%` est un code de champ Desktop Entry : il doit être doublé.
+        assert_eq!(desktop_exec(Path::new("/home/a%b/bin")), "/home/a%%b/bin");
     }
 
     #[test]

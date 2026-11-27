@@ -54,6 +54,9 @@ impl Cidr {
         if self.prefix > 32 {
             return Err(crate::i18n::tr().cidr_prefix_max(self.prefix));
         }
+        if self.prefix < 8 {
+            return Err(crate::i18n::tr().cidr_prefix_min(self.prefix));
+        }
         if self.addr.is_unspecified() || self.addr.octets()[0] == 0 {
             return Err(crate::i18n::tr().cidr_unspecified().into());
         }
@@ -193,6 +196,9 @@ mod tests {
         assert!(Cidr::parse("").is_err());
         assert!(Cidr::parse("192.168.1").is_err());
         assert!(Cidr::parse("192.168.1.1/33").is_err());
+        assert!(Cidr::parse("10.0.0.1/0").is_err());
+        assert!(Cidr::parse("10.0.0.1/7").is_err());
+        assert!(Cidr::parse("10.0.0.1/8").is_ok());
         assert!(Cidr::parse("192.168.1.1/").is_err());
         assert!(Cidr::parse("192.168.1.1 /24").is_err());
     }

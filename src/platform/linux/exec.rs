@@ -18,6 +18,8 @@ fn run_inner(program: &str, args: &[&str], log_it: bool) -> Result<String, Strin
 
     let output = Command::new(program)
         .args(args)
+        .env("LC_ALL", "C")
+        .env("LANG", "C")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

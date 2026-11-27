@@ -465,6 +465,17 @@ impl T {
         }
     }
 
+    pub fn session_other_iface(&self, ifname: &str) -> String {
+        match lang() {
+            Lang::Fr => format!(
+                "Une configuration temporaire est active sur {ifname}. Termine-la (DHCP ou Quitter) ou sélectionne cette interface."
+            ),
+            Lang::En => format!(
+                "A temporary configuration is active on {ifname}. Finish it (DHCP or Quit) or select that interface."
+            ),
+        }
+    }
+
     // --- Linux : helper privilégié et commandes système ---
     pub fn command_failed(&self, program: &str, details: &str) -> String {
         match lang() {
@@ -527,6 +538,12 @@ impl T {
         match lang() {
             Lang::Fr => format!("Préfixe /{prefix} invalide : maximum /32"),
             Lang::En => format!("Invalid prefix /{prefix}: maximum /32"),
+        }
+    }
+    pub fn cidr_prefix_min(&self, prefix: u8) -> String {
+        match lang() {
+            Lang::Fr => format!("Préfixe /{prefix} trop large : minimum /8"),
+            Lang::En => format!("Prefix /{prefix} is too broad: minimum /8"),
         }
     }
     pub fn cidr_unspecified(&self) -> &'static str {

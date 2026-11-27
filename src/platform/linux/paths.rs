@@ -40,9 +40,12 @@ fn home() -> PathBuf {
 /// sinon `<home>/<fallback>`. Fonction pure pour rester testable sans muter
 /// l'environnement du processus (interdit en edition 2024).
 fn xdg_base(value: Option<&OsStr>, home: &Path, fallback: &str) -> PathBuf {
+    // La spécification XDG impose un chemin absolu : une valeur relative est
+    // ignorée (elle pourrait sinon écrire dans le répertoire courant).
     value
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
+        .filter(|path| path.is_absolute())
         .unwrap_or_else(|| home.join(fallback))
 }
 
@@ -64,13 +67,27 @@ pub fn data_home() -> PathBuf {
     xdg_base(value.as_deref(), &home(), ".local/share")
 }
 
-/// `$XDG_RUNTIME_DIR` (défaut `/tmp`) : verrou d'instance, PID et socket.
+/// `$XDG_RUNTIME_DIR` (défaut `/tmp/fastipswitch-<uid>`) : verrou d'instance,
+/// PID et socket. En l'absence de répertoire runtime, on crée un sous-dossier
+/// privé (0700) plutôt que d'écrire directement dans `/tmp`.
 pub fn runtime_dir() -> PathBuf {
     let value = std::env::var_os("XDG_RUNTIME_DIR");
-    value
+    if let Some(dir) = value
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("/tmp"))
+        .filter(|path| path.is_absolute())
+    {
+        return dir;
+    }
+
+    let dir = PathBuf::from("/tmp").join(format!("fastipswitch-{}", unsafe { libc::geteuid() }));
+    let _ = fs::create_dir_all(&dir);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(&dir, fs::Permissions::from_mode(0o700));
+    }
+    dir
 }
 
 /// Préférences et liste d'alias : `$XDG_CONFIG_HOME/fastipswitch`.
@@ -105,6 +122,15 @@ mod tests {
         assert_eq!(
             xdg_base(Some(OsStr::new("/tmp/state")), &home, ".local/state"),
             path("/tmp/state")
+        );
+    }
+
+    #[test]
+    fn xdg_relatif_ignore() {
+        let home = path("/home/test");
+        assert_eq!(
+            xdg_base(Some(OsStr::new("config-relatif")), &home, ".config"),
+            path("/home/test/.config")
         );
     }
 

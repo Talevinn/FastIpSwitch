@@ -2,10 +2,14 @@
 // Copyright (C) 2026 Valentin PICARD
 
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use serde::de::DeserializeOwned;
+
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 
 use crate::cidr::Cidr;
 
@@ -93,12 +97,32 @@ fn load_toml<T: DeserializeOwned>(path: &Path) -> Option<T> {
 fn save_toml<T: Serialize>(path: &Path, value: &T) -> Result<(), String> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("création de {parent:?} : {e}"))?;
+        // Les fichiers d'état contiennent MAC, IP, DNS et UUID de connexion.
+        #[cfg(unix)]
+        let _ = fs::set_permissions(parent, fs::Permissions::from_mode(0o700));
     }
     let tmp = path.with_extension("toml.tmp");
     let data = toml::to_string_pretty(value).map_err(|e| e.to_string())?;
-    fs::write(&tmp, data.as_bytes()).map_err(|e| format!("écriture de {tmp:?} : {e}"))?;
+    write_private(&tmp, data.as_bytes()).map_err(|e| format!("écriture de {tmp:?} : {e}"))?;
     fs::rename(&tmp, path).map_err(|e| format!("remplacement de {path:?} : {e}"))?;
     Ok(())
+}
+
+fn write_private(path: &Path, data: &[u8]) -> std::io::Result<()> {
+    #[cfg(unix)]
+    {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(path)?;
+        file.write_all(data)
+    }
+    #[cfg(not(unix))]
+    {
+        fs::write(path, data)
+    }
 }
 
 pub fn load_ui_state() -> UiState {

@@ -7,6 +7,13 @@
 set -e
 
 if [ "$1" = "configure" ]; then
+    # Défense en profondeur : le helper est exécuté en root par pkexec, il ne
+    # doit jamais appartenir à un utilisateur ni être inscriptible.
+    if [ -f /usr/libexec/fastipswitch/fastipswitch-helper ]; then
+        chown root:root /usr/libexec/fastipswitch/fastipswitch-helper || true
+        chmod 0755 /usr/libexec/fastipswitch/fastipswitch-helper || true
+    fi
+
     if command -v update-desktop-database >/dev/null 2>&1; then
         update-desktop-database -q /usr/share/applications || true
     fi

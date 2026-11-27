@@ -26,7 +26,7 @@ Priority: optional
 Architecture: @ARCH@
 Maintainer: Valentin PICARD <developpeur@talevinn.fr>
 Installed-Size: @INSTALLED_SIZE@
-Depends: libc6, libgcc-s1, libfontconfig1, libfreetype6, libxkbcommon0, libwayland-client0 | libx11-6, libegl1 | libgl1, iproute2, pkexec | policykit-1
+Depends: libc6, libgcc-s1, libfontconfig1, libfreetype6, libxkbcommon0, libxkbcommon-x11-0, libx11-6, libx11-xcb1, libxcursor1, libxi6, libxrandr2, libwayland-client0, libegl1 | libgl1, iproute2, pkexec | policykit-1
 Recommends: network-manager
 Suggests: hicolor-icon-theme
 Homepage: https://codeberg.org/Talevinn/FastIpSwitch

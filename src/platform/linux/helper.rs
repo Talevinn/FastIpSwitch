@@ -48,6 +48,7 @@ pub fn call(request: &Request) -> Result<Response, String> {
     let payload = serde_json::to_vec(request)
         .map_err(|e| crate::i18n::tr().command_failed("helper", &e.to_string()))?;
 
+    #[cfg(debug_assertions)]
     if std::env::var_os("FASTIPSWITCH_DRY_RUN").is_some() {
         log::write(&format!(
             "[dry-run] helper {}",
@@ -61,7 +62,14 @@ pub fn call(request: &Request) -> Result<Response, String> {
     let mut command = if unsafe { libc::geteuid() } == 0 {
         Command::new(&helper)
     } else {
-        let mut command = Command::new("pkexec");
+        // Chemin absolu quand il existe : un `pkexec` placé dans le PATH de
+        // l'utilisateur ne doit pas pouvoir se faire passer pour l'original.
+        let pkexec = if PathBuf::from("/usr/bin/pkexec").is_file() {
+            "/usr/bin/pkexec"
+        } else {
+            "pkexec"
+        };
+        let mut command = Command::new(pkexec);
         command.arg(&helper);
         command
     };

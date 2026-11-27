@@ -230,7 +230,14 @@ fn parse_route_json(text: &str) -> Result<Vec<RouteInfo>, String> {
 fn parse_nmcli_connections(text: &str) -> Vec<(String, String)> {
     text.lines()
         .filter_map(|line| {
-            let (uuid, device) = line.split_once(':')?;
+            // `nmcli -t` échappe les `:` par `\:` (noms d'interface MAC,
+            // profils, etc.) : un simple split_once couperait le nom.
+            let mut fields = split_nmcli_fields(line);
+            if fields.len() < 2 {
+                return None;
+            }
+            let device = fields.pop()?;
+            let uuid = fields.pop()?;
             let uuid = uuid.trim();
             let device = device.trim();
             if uuid.is_empty() || device.is_empty() {
@@ -240,6 +247,26 @@ fn parse_nmcli_connections(text: &str) -> Vec<(String, String)> {
             }
         })
         .collect()
+}
+
+/// Découpe une sortie `nmcli -t` en respectant les échappements `\:`.
+fn split_nmcli_fields(line: &str) -> Vec<String> {
+    let mut fields = Vec::new();
+    let mut current = String::new();
+    let mut chars = line.chars();
+
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' => match chars.next() {
+                Some(escaped) => current.push(escaped),
+                None => current.push('\\'),
+            },
+            ':' => fields.push(std::mem::take(&mut current)),
+            _ => current.push(c),
+        }
+    }
+    fields.push(current);
+    fields
 }
 
 /// Analyse `nmcli -g IP4.DNS device show <if>` : une adresse par ligne.
@@ -541,5 +568,16 @@ mod tests {
         );
         assert!(parse_nmcli_connections("").is_empty());
         assert!(parse_nmcli_connections(":eth0\nuuid:\n").is_empty());
+
+        // `nmcli -t` échappe les `:` des noms d'interface (ex. MAC).
+        assert_eq!(
+            parse_nmcli_connections(
+                "1be4d962-28a0-4aac-a781-d2563059092b:44\\:F2\\:1B\\:96\\:18\\:A3\n"
+            ),
+            vec![(
+                "1be4d962-28a0-4aac-a781-d2563059092b".to_string(),
+                "44:F2:1B:96:18:A3".to_string()
+            )]
+        );
     }
 }

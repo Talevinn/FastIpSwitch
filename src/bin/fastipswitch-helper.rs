@@ -7,14 +7,24 @@
 use std::io::Read;
 use std::process::ExitCode;
 
+/// Taille maximale acceptée sur stdin (une requête légitime fait < 1 Kio).
+const MAX_INPUT: u64 = 64 * 1024;
+
 use fastipswitch::helper::protocol::{Request, Response};
 use fastipswitch::helper::{exec, validate};
 
 fn main() -> ExitCode {
-    let mut input = String::new();
-    if let Err(e) = std::io::stdin().read_to_string(&mut input) {
+    let mut raw = Vec::new();
+    if let Err(e) = std::io::stdin().take(MAX_INPUT + 1).read_to_end(&mut raw) {
         return reply(Response::error(format!("lecture de la requête : {e}")));
     }
+    if raw.len() as u64 > MAX_INPUT {
+        return reply(Response::error("requête trop volumineuse"));
+    }
+    let input = match String::from_utf8(raw) {
+        Ok(input) => input,
+        Err(_) => return reply(Response::error("requête non UTF-8")),
+    };
 
     let request: Request = match serde_json::from_str(&input) {
         Ok(request) => request,

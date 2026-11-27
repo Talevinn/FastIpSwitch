@@ -135,9 +135,15 @@ fn main() -> anyhow::Result<()> {
         return Ok(());
     }
 
-    let mut adapters = platform::read_adapters().unwrap_or_default();
+    let adapters_read = platform::read_adapters();
+    let mut adapters = adapters_read.clone().unwrap_or_default();
     let recovery = if admin {
-        worker::recover_pending(&adapters)
+        match &adapters_read {
+            Ok(list) => worker::recover_pending(list),
+            // Ne pas effacer une session de récupération sur une erreur de
+            // lecture transitoire.
+            Err(_) => None,
+        }
     } else {
         None
     };
