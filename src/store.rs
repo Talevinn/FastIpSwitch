@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Valentin PICARD
 
 use std::fs;
+#[cfg(unix)]
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
