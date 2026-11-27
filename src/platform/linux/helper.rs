@@ -8,9 +8,15 @@ use std::process::{Command, Stdio};
 use crate::helper::protocol::{Request, Response};
 use crate::log;
 
-/// Chemin du helper : variable d'environnement (développement), installation
-/// système, puis binaire voisin (exécution depuis `target/`).
+/// Chemin du helper.
+///
+/// En release, seul l'emplacement système est accepté : une variable
+/// d'environnement ou un binaire voisin choisis par l'utilisateur ne doivent
+/// pas pouvoir détourner l'élévation pkexec. En debug, on autorise
+/// `FASTIPSWITCH_HELPER` et le binaire voisin de `target/` pour le
+/// développement.
 fn helper_path() -> Result<PathBuf, String> {
+    #[cfg(debug_assertions)]
     if let Some(path) = std::env::var_os("FASTIPSWITCH_HELPER") {
         let path = PathBuf::from(path);
         if path.is_file() {
@@ -24,6 +30,7 @@ fn helper_path() -> Result<PathBuf, String> {
         return Ok(system);
     }
 
+    #[cfg(debug_assertions)]
     if let Ok(exe) = std::env::current_exe()
         && let Some(dir) = exe.parent()
     {
