@@ -352,8 +352,14 @@ fn main() -> anyhow::Result<()> {
     {
         let app = app.clone();
         window.window().on_close_requested(move || {
-            if app.borrow().admin {
+            let admin = app.borrow().admin;
+            if platform::hides_on_close(admin) {
                 slint::CloseRequestResponse::HideWindow
+            } else if admin {
+                // Linux : pas de tray universel, on quitte proprement pour ne
+                // pas laisser une fenêtre cachée inaccessible.
+                app.borrow_mut().quit();
+                slint::CloseRequestResponse::KeepWindowShown
             } else {
                 let _ = slint::quit_event_loop();
                 slint::CloseRequestResponse::KeepWindowShown

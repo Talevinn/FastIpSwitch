@@ -39,6 +39,10 @@ pub fn lang_is_french() -> bool {
     sys::lang_is_french()
 }
 
+pub fn hides_on_close(admin: bool) -> bool {
+    admin
+}
+
 pub fn error_box(message: &str) {
     sys::error_box(message);
 }

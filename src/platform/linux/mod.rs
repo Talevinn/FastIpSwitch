@@ -43,6 +43,10 @@ pub fn system_is_dark() -> bool {
     theme::system_is_dark()
 }
 
+pub fn hides_on_close(_admin: bool) -> bool {
+    false
+}
+
 pub fn lang_is_french() -> bool {
     let value = ["LC_ALL", "LC_MESSAGES", "LANG"].iter().find_map(|var| {
         std::env::var(var)

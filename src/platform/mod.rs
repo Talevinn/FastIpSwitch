@@ -164,6 +164,13 @@ pub fn lang_is_french() -> bool {
     imp::lang_is_french()
 }
 
+/// La fermeture de fenêtre masque-t-elle l'application dans la zone de
+/// notification ? Windows : oui en mode élevé. Linux : non (le tray n'est pas
+/// garanti, cacher la fenêtre la rendrait inaccessible).
+pub fn hides_on_close(admin: bool) -> bool {
+    imp::hides_on_close(admin)
+}
+
 pub fn error_box(message: &str) {
     imp::error_box(message);
 }

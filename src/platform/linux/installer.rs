@@ -63,17 +63,28 @@ fn roots() -> Roots {
     }
 }
 
-/// Répertoire d'installation par utilisateur.
-pub fn install_dir() -> PathBuf {
-    roots().install
+/// Binaire installé par le paquet système (voir `packaging/`).
+pub fn system_exe() -> PathBuf {
+    PathBuf::from("/usr/bin/fastipswitch")
 }
 
+/// Répertoire affiché dans l'interface : l'installation système prime sur
+/// l'installation par utilisateur.
+pub fn install_dir() -> PathBuf {
+    if system_exe().is_file() {
+        PathBuf::from("/usr/bin")
+    } else {
+        roots().install
+    }
+}
+
+/// Cible d'une installation par utilisateur (`~/.local/bin`).
 pub fn installed_exe() -> PathBuf {
-    install_dir().join("fastipswitch")
+    roots().install.join("fastipswitch")
 }
 
 pub fn is_installed() -> bool {
-    installed_exe().is_file()
+    installed_exe().is_file() || system_exe().is_file()
 }
 
 pub fn autostart_enabled() -> bool {
@@ -89,35 +100,58 @@ fn autostart_file() -> PathBuf {
 
 /// Installe l'application dans le répertoire utilisateur et renvoie ce
 /// répertoire (`~/.local/bin`).
+///
+/// Si le paquet système est déjà installé (`/usr/bin/fastipswitch`), on ne
+/// recopie rien : seule l'entrée d'autostart est gérée.
 pub fn install(with_autostart: bool) -> Result<String, String> {
     let roots = roots();
     let source = std::env::current_exe()
         .map_err(|e| format!("Impossible de localiser l'exécutable courant : {e}"))?;
 
-    install_with(&roots, &source, with_autostart)?;
-    Ok(roots.install.display().to_string())
+    let system = system_exe();
+    let target = if system.is_file() {
+        system
+    } else {
+        roots.install.join("fastipswitch")
+    };
+
+    install_with(&roots, &source, &target, with_autostart)?;
+
+    Ok(target
+        .parent()
+        .map(|dir| dir.display().to_string())
+        .unwrap_or_else(|| roots.install.display().to_string()))
 }
 
-fn install_with(roots: &Roots, source: &Path, with_autostart: bool) -> Result<(), String> {
-    fs::create_dir_all(&roots.install)
-        .map_err(|e| io_error("création du répertoire", &roots.install, e))?;
+fn install_with(
+    roots: &Roots,
+    source: &Path,
+    target: &Path,
+    with_autostart: bool,
+) -> Result<(), String> {
+    let user_install = target.starts_with(&roots.install);
 
-    let target = roots.install.join("fastipswitch");
-    if !same_file(source, &target) {
-        fs::copy(source, &target)
-            .map_err(|e| io_error("copie de l'exécutable vers", &target, e))?;
+    if user_install {
+        fs::create_dir_all(&roots.install)
+            .map_err(|e| io_error("création du répertoire", &roots.install, e))?;
+    }
+
+    if !same_file(source, target) {
+        fs::copy(source, target).map_err(|e| io_error("copie de l'exécutable vers", target, e))?;
     }
 
     // Les exécutables installés restent accessibles à tous, comme le binaire
     // d'origine dans `target/`.
-    fs::set_permissions(&target, fs::Permissions::from_mode(0o755))
-        .map_err(|e| io_error("changement de permissions de", &target, e))?;
+    fs::set_permissions(target, fs::Permissions::from_mode(0o755))
+        .map_err(|e| io_error("changement de permissions de", target, e))?;
 
-    install_icons(roots)?;
-    write_file(
-        &roots.data.join("applications").join("fastipswitch.desktop"),
-        &desktop_entry(&target),
-    )?;
+    if user_install {
+        install_icons(roots)?;
+        write_file(
+            &roots.data.join("applications").join("fastipswitch.desktop"),
+            &desktop_entry(target),
+        )?;
+    }
 
     let autostart = roots.config.join("autostart").join("fastipswitch.desktop");
     if with_autostart {
@@ -245,7 +279,8 @@ mod tests {
         let source = base.join("source-fastipswitch");
         fs::write(&source, b"binaire factice").unwrap();
 
-        install_with(&roots, &source, false).unwrap();
+        let target = roots.install.join("fastipswitch");
+        install_with(&roots, &source, &target, false).unwrap();
 
         let exe = roots.install.join("fastipswitch");
         assert_eq!(fs::read(&exe).unwrap(), b"binaire factice");
@@ -282,11 +317,12 @@ mod tests {
         let source = base.join("source-fastipswitch");
         fs::write(&source, b"binaire factice").unwrap();
 
-        install_with(&roots, &source, false).unwrap();
+        let target = roots.install.join("fastipswitch");
+        install_with(&roots, &source, &target, false).unwrap();
         let exe = roots.install.join("fastipswitch");
 
         // Source = cible : la copie sur soi-même doit être évitée sans erreur.
-        install_with(&roots, &exe, true).unwrap();
+        install_with(&roots, &exe, &exe, true).unwrap();
         assert_eq!(fs::read(&exe).unwrap(), b"binaire factice");
 
         let autostart = roots.config.join("autostart/fastipswitch.desktop");
@@ -294,7 +330,7 @@ mod tests {
         assert!(contents.contains("X-GNOME-Autostart-enabled=true"));
         assert!(contents.contains(&format!("Exec={}", exe.display())));
 
-        install_with(&roots, &exe, false).unwrap();
+        install_with(&roots, &exe, &exe, false).unwrap();
         assert!(!autostart.exists());
 
         let _ = fs::remove_dir_all(&base);
