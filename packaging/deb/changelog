@@ -1,0 +1,10 @@
+fastipswitch (@VERSION@) unstable; urgency=medium
+
+  * Version initiale du portage Linux.
+  * Interface Slint (thème clair/sombre, français/anglais).
+  * Bascule DHCP / IPv4 statique et IP virtuelles via un helper privilégié
+    lancé par pkexec et restreint par une action polkit.
+  * Empaquetage Debian/Ubuntu/Linux Mint : binaire, helper, policy polkit,
+    entrée de menu, icônes hicolor, métadonnées AppStream et page de manuel.
+
+ -- Valentin PICARD <developpeur@talevinn.fr>  Fri, 27 Nov 2026 12:00:00 +0100

@@ -1,0 +1,13 @@
+#!/bin/sh
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Copyright (C) 2026 Valentin PICARD
+#
+# Pré-désinstallation : aucun fichier utilisateur n'est touché.
+# La configuration (~/.config/fastipswitch), l'état (~/.local/state) et
+# l'autostart (~/.config/autostart) sont conservés, y compris lors d'une
+# réinstallation ultérieure.
+set -e
+
+# Éventuelle session de récupération en cours : rien à arrêter, l'application
+# se termine d'elle-même. Les caches seront rafraîchis par postrm.
+exit 0

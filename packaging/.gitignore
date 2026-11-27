@@ -1,0 +1,2 @@
+# Arborescence de construction des paquets (staging et .deb de sortie).
+/.build/
