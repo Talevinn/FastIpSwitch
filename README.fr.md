@@ -143,6 +143,10 @@ Binaire : `target\release\fastipswitch.exe`. `.cargo/config.toml` active `+crt-s
 - Une seule instance à la fois.
 - Installation par utilisateur uniquement (pas d'installation machine-wide).
 
+## Développement
+
+Une partie du code peut avoir été générée avec une IA ; elle est relue, testée et validée par le mainteneur. Voir AGENTS.md et CONVENTIONS.md pour les règles appliquées au dépôt.
+
 ## Licence
 
 GPL-3.0-or-later — voir `LICENSE` et `NOTICE`.
