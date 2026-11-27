@@ -1,0 +1,9 @@
+/target
+/data/
+/certs/
+*.pfx
+*.pvk
+*.log
+*.tmp
+.idea/
+.vscode/

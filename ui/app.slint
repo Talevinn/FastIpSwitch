@@ -1,0 +1,1157 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Valentin PICARD
+
+// FastIpSwitch — thème « rack » inspiré du hardware audio
+// Variante sombre = palette fournie ; variante claire = aluminium.
+// Le booléen `dark` est piloté depuis Rust (registre Windows, mise à jour à chaud).
+
+export global RackTheme {
+    in-out property <bool> dark: true;
+
+    // Surfaces (rails & plaques aluminium)
+    out property <color> rail-bg: dark ? #141517 : #e6e8ec;
+    out property <color> module-bg: dark ? #1f2124 : #f4f5f7;
+    out property <color> field-bg: dark ? #121315 : #ffffff;
+    out property <color> border-metal: dark ? #32363e : #c2c7d0;
+
+    // Sérigraphie
+    out property <color> ink-primary: dark ? #f0f2f5 : #1b1d21;
+    out property <color> ink-silkscreen: dark ? #9ba1ab : #5e6572;
+    out property <color> ink-muted: dark ? #6b7280 : #8a909b;
+
+    // Accents & LEDs
+    out property <color> jack-gold: dark ? #e09f3e : #b8791a;
+    out property <color> jack-ink: #1a1206;
+    out property <color> led-rec: #e63946;
+    out property <color> led-signal: dark ? #2ec4b6 : #1f9d8f;
+    out property <color> led-off: dark ? #3a3f47 : #b6bcc6;
+
+    // Géométrie usinée
+    out property <length> panel-radius: 3px;
+    out property <length> control-radius: 2px;
+}
+
+export struct AliasRow {
+    id: int,
+    cidr: string,
+    enabled: bool,
+    busy: bool,
+}
+
+component Divider inherits Rectangle {
+    height: 1px;
+    background: RackTheme.border-metal;
+    opacity: 0.7;
+}
+
+component SectionTitle inherits Text {
+    font-size: 10px;
+    font-weight: 600;
+    color: RackTheme.ink-silkscreen;
+    letter-spacing: 1.2px;
+    vertical-alignment: center;
+}
+
+// Centre verticalement un contrôle de hauteur fixe dans une rangée.
+component CenterV inherits VerticalLayout {
+    alignment: center;
+}
+
+component RackButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary: false;
+    in property <bool> outline: false;
+    in property <bool> enabled: true;
+    in property <length> label-size: 11px;
+    in property <string> tooltip: "";
+    callback clicked();
+
+    border-radius: RackTheme.control-radius;
+    border-width: 1px;
+    border-color: primary || outline ? RackTheme.jack-gold : RackTheme.border-metal;
+    background: !root.enabled
+        ? RackTheme.module-bg
+        : primary
+            ? (ta.pressed
+                ? (RackTheme.dark ? #c98a2e : #9f6714)
+                : ta.has-hover
+                    ? (RackTheme.dark ? #e8ab52 : #c9871f)
+                    : RackTheme.jack-gold)
+            : outline
+                ? (ta.pressed
+                    ? RackTheme.jack-gold.transparentize(0.85)
+                    : ta.has-hover
+                        ? RackTheme.jack-gold.transparentize(0.9)
+                        : transparent)
+                : (ta.pressed
+                    ? (RackTheme.dark ? #17191c : #e4e7ec)
+                    : ta.has-hover
+                        ? (RackTheme.dark ? #26292d : #e9ebef)
+                        : RackTheme.module-bg);
+
+    if root.tooltip != "" : Tooltip {
+        HorizontalLayout {
+            padding: 6px;
+
+            Text {
+                text: root.tooltip;
+                font-size: 11px;
+                color: RackTheme.ink-primary;
+            }
+        }
+    }
+
+    Text {
+        text: root.text;
+        width: parent.width;
+        height: parent.height;
+        font-size: root.label-size;
+        font-weight: 600;
+        letter-spacing: 0.6px;
+        color: primary ? RackTheme.jack-ink : outline ? RackTheme.jack-gold : RackTheme.ink-primary;
+        opacity: root.enabled ? 1.0 : 0.4;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+component GhostButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> enabled: true;
+    in property <length> label-size: 14px;
+    in property <string> tooltip: "";
+    callback clicked();
+
+    width: 26px;
+    height: 26px;
+    border-radius: RackTheme.control-radius;
+    background: ta.has-hover ? RackTheme.border-metal.transparentize(0.4) : transparent;
+
+    if root.tooltip != "" : Tooltip {
+        HorizontalLayout {
+            padding: 6px;
+
+            Text {
+                text: root.tooltip;
+                font-size: 11px;
+                color: RackTheme.ink-primary;
+            }
+        }
+    }
+
+    Text {
+        text: root.text;
+        width: parent.width;
+        height: parent.height;
+        font-size: root.label-size;
+        color: RackTheme.ink-silkscreen;
+        opacity: root.enabled ? 1.0 : 0.35;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            root.clicked();
+        }
+    }
+}
+
+component RackField inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder;
+    in property <bool> enabled: true;
+    callback accepted();
+
+    height: 36px;
+    background: RackTheme.field-bg;
+    border-width: 1px;
+    border-color: input.has-focus ? RackTheme.jack-gold : RackTheme.border-metal;
+    border-radius: RackTheme.control-radius;
+    opacity: root.enabled ? 1.0 : 0.55;
+
+    input := TextInput {
+        x: 10px;
+        width: parent.width - 20px;
+        height: parent.height;
+        vertical-alignment: center;
+        font-size: 13px;
+        font-family: "Consolas";
+        color: RackTheme.ink-primary;
+        single-line: true;
+        enabled: root.enabled;
+        text <=> root.text;
+        accepted() => {
+            root.accepted();
+        }
+    }
+
+    if root.text == "" && !input.has-focus : Text {
+        x: 11px;
+        width: parent.width - 22px;
+        height: parent.height;
+        text: root.placeholder;
+        font-size: 12px;
+        font-family: "Consolas";
+        color: RackTheme.ink-silkscreen;
+        opacity: 0.55;
+        vertical-alignment: center;
+    }
+}
+
+component RackSwitch inherits Rectangle {
+    in-out property <bool> checked;
+    in property <bool> enabled: true;
+    in property <string> tooltip: "";
+    callback toggled();
+
+    width: 40px;
+    height: 22px;
+    border-radius: 11px;
+    border-width: 1px;
+    border-color: RackTheme.border-metal;
+    background: root.checked ? RackTheme.led-signal : RackTheme.led-off;
+    opacity: root.enabled ? 1.0 : 0.45;
+
+    if root.tooltip != "" : Tooltip {
+        HorizontalLayout {
+            padding: 6px;
+
+            Text {
+                text: root.tooltip;
+                font-size: 11px;
+                color: RackTheme.ink-primary;
+            }
+        }
+    }
+
+    Rectangle {
+        width: 16px;
+        height: 16px;
+        y: 2px;
+        x: root.checked ? 21px : 3px;
+        border-radius: 8px;
+        background: root.checked ? #f0f7f6 : #eef0f3;
+        animate x { duration: 120ms; easing: ease-out; }
+    }
+
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled();
+        }
+    }
+}
+
+// Gros interrupteur transversal « DHCP » : retour aux réglages par défaut.
+component DhcpSwitch inherits Rectangle {
+    in property <bool> active;
+    in property <bool> enabled: true;
+    in property <string> tooltip: "";
+    callback toggled(bool);
+
+    height: 52px;
+    background: RackTheme.field-bg;
+    border-width: 1px;
+    border-color: (ta.has-hover && root.enabled) ? RackTheme.jack-gold : RackTheme.border-metal;
+    border-radius: RackTheme.control-radius;
+    opacity: root.enabled ? 1.0 : 0.55;
+
+    if root.tooltip != "" : Tooltip {
+        HorizontalLayout {
+            padding: 6px;
+
+            Text {
+                text: root.tooltip;
+                font-size: 11px;
+                color: RackTheme.ink-primary;
+            }
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 7px;
+        padding-right: 10px;
+        spacing: 12px;
+
+        Text {
+            text: "DHCP";
+            font-size: 20px;
+            font-weight: 600;
+            letter-spacing: 3px;
+            color: root.active ? RackTheme.ink-primary : RackTheme.ink-silkscreen;
+            vertical-alignment: center;
+        }
+
+        Rectangle { }
+
+        CenterV {
+            Rectangle {
+                width: 86px;
+                height: 34px;
+                border-radius: 17px;
+                border-width: 1px;
+                border-color: RackTheme.border-metal;
+                background: root.active ? RackTheme.led-signal : RackTheme.led-off;
+
+                Rectangle {
+                    width: 26px;
+                    height: 26px;
+                    y: 3px;
+                    x: root.active ? 56px : 3px;
+                    border-radius: 13px;
+                    background: #f0f2f5;
+                    animate x { duration: 140ms; easing: ease-out; }
+                }
+            }
+        }
+    }
+
+    ta := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            root.toggled(!root.active);
+        }
+    }
+}
+
+component RackSelect inherits Rectangle {
+    in property <[string]> model;
+    in property <int> current-index: 0;
+    in property <bool> enabled: true;
+    callback opened();
+
+    property <string> current: model.length > 0 && current-index >= 0 && current-index < model.length ? model[current-index] : empty-text;
+
+    in property <string> empty-text: "Aucun adaptateur";
+
+    height: 36px;
+    background: RackTheme.field-bg;
+    border-width: 1px;
+    border-color: head.has-hover && root.enabled ? RackTheme.jack-gold : RackTheme.border-metal;
+    border-radius: RackTheme.control-radius;
+    opacity: root.enabled ? 1.0 : 0.55;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 6px;
+
+        Text {
+            text: root.current;
+            font-size: 13px;
+            color: RackTheme.ink-primary;
+            vertical-alignment: center;
+        }
+
+        Rectangle { }
+
+        CenterV {
+            Path {
+                width: 9px;
+                height: 5px;
+                commands: "M 0 0 L 4.5 5 L 9 0";
+                stroke: RackTheme.ink-silkscreen;
+                stroke-width: 1.4px;
+                fill: transparent;
+            }
+        }
+    }
+
+    head := TouchArea {
+        enabled: root.enabled;
+        clicked => {
+            root.opened();
+        }
+    }
+}
+export component MainWindow inherits Window {
+    title: "FastIpSwitch V0.1";
+    width: 440px;
+    height: 660px;
+    background: RackTheme.rail-bg;
+    default-font-family: "Segoe UI";
+    default-font-size: 13px;
+
+    in-out property <bool> dark: true;
+    in-out property <[string]> adapter-names;
+    in-out property <int> selected-adapter: 0;
+    in-out property <bool> has-adapters: true;
+    in-out property <string> status-main: "—";
+    in-out property <string> mode-text: "—";
+    in-out property <string> ip-input: "";
+    in-out property <string> gateway-input: "";
+    in-out property <string> dns-input: "";
+    in-out property <[AliasRow]> aliases;
+    in-out property <int> active-count: 0;
+    in-out property <bool> busy: false;
+    in-out property <bool> adding: false;
+    in-out property <string> add-input: "";
+    in-out property <string> message: "Prêt";
+    in-out property <bool> message-error: false;
+    in-out property <bool> adapter-menu-open: false;
+    in-out property <bool> admin: true;
+    in-out property <string> elevation-error: "";
+    in-out property <bool> dhcp-mode: true;
+    in property <image> logo;
+
+    in-out property <string> t-address: "";
+    in-out property <string> t-virtual: "";
+    in-out property <string> t-apply: "";
+    in-out property <string> t-gateway: "";
+    in-out property <string> t-add: "";
+    in-out property <string> t-quit: "";
+    in-out property <string> t-no-aliases: "";
+    in-out property <string> t-no-adapter: "Aucun adaptateur";
+    in-out property <string> t-lock-title: "";
+    in-out property <string> t-lock-body: "";
+    in-out property <string> t-elevate: "";
+    in-out property <string> t-close: "";
+    in-out property <string> t-install-title: "";
+    in-out property <string> t-install-dest: "";
+    in-out property <string> t-install-autostart: "";
+    in-out property <string> t-install-autostart-hint: "";
+    in-out property <string> t-install-button: "";
+    in-out property <string> t-reinstall: "";
+    in-out property <string> t-cancel: "";
+    in-out property <string> t-add-tip: "";
+    in-out property <string> t-remove-tip: "";
+    in-out property <string> t-toggle-tip: "";
+    in-out property <string> t-dhcp-tip: "";
+    in-out property <string> t-install-tip: "";
+    in-out property <string> t-installed-tag: "";
+    in-out property <string> t-gateway-label: "";
+    in-out property <string> t-dns-label: "";
+    in-out property <string> t-dns-placeholder: "";
+    in-out property <string> t-autostart-tip: "";
+
+    in-out property <bool> installer-open: false;
+    in-out property <bool> installed: false;
+    in-out property <bool> autostart: false;
+    in-out property <string> install-dir: "";
+    in-out property <string> installer-message: "";
+    in-out property <bool> installer-error: false;
+
+    callback install(bool);
+    callback close-installer();
+
+    callback refresh();
+    callback select-adapter(string);
+    callback apply();
+    callback dhcp();
+    callback add-alias(string);
+    callback toggle-alias(int, bool);
+    callback remove-alias(int);
+    callback quit();
+    callback elevate();
+    callback close-app();
+    callback toggle-dhcp(bool);
+
+    VerticalLayout {
+        padding: 14px;
+        spacing: 10px;
+
+        // En-tête sérigraphié
+        HorizontalLayout {
+            height: 30px;
+            spacing: 8px;
+            padding-left: 11px;
+
+            CenterV {
+                Image {
+                    source: root.logo;
+                    width: 24px;
+                    height: 24px;
+                    image-fit: contain;
+                }
+            }
+
+            Text {
+                text: "FASTIPSWITCH";
+                font-size: 11px;
+                font-weight: 600;
+                letter-spacing: 2px;
+                color: RackTheme.ink-silkscreen;
+                vertical-alignment: center;
+            }
+
+            Rectangle { }
+
+            CenterV {
+                if root.installed : Rectangle {
+                width: 72px;
+                height: 28px;
+                border-radius: RackTheme.control-radius;
+                background: installedTa.has-hover ? RackTheme.border-metal.transparentize(0.4) : transparent;
+
+                Text {
+                    text: root.t-installed-tag;
+                    width: parent.width;
+                    height: parent.height;
+                    font-size: 10px;
+                    letter-spacing: 0.5px;
+                    color: RackTheme.led-signal;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                installedTa := TouchArea {
+                    clicked => {
+                        root.installer-message = "";
+                        root.installer-error = false;
+                        root.installer-open = true;
+                    }
+                }
+
+                Tooltip {
+                    HorizontalLayout {
+                        padding: 6px;
+
+                        Text {
+                            text: root.t-install-tip;
+                            font-size: 11px;
+                            color: RackTheme.ink-primary;
+                        }
+                    }
+                }
+            }
+
+            if !root.installed : Rectangle {
+                width: 28px;
+                height: 28px;
+                border-radius: RackTheme.control-radius;
+                background: installTa.has-hover ? RackTheme.border-metal.transparentize(0.4) : transparent;
+
+                Path {
+                    x: 7px;
+                    y: 7px;
+                    width: 14px;
+                    height: 14px;
+                    commands: "M 7 1 L 7 9 M 3 6 L 7 10 L 11 6 M 2 12 L 12 12";
+                    stroke: RackTheme.ink-silkscreen;
+                    stroke-width: 1.6px;
+                    fill: transparent;
+                }
+
+                installTa := TouchArea {
+                    clicked => {
+                        root.installer-message = "";
+                        root.installer-error = false;
+                        root.installer-open = true;
+                    }
+                }
+
+                Tooltip {
+                    HorizontalLayout {
+                        padding: 6px;
+
+                        Text {
+                            text: root.t-install-tip;
+                            font-size: 11px;
+                            color: RackTheme.ink-primary;
+                        }
+                    }
+                }
+            }
+            }
+        }
+
+        // Module principal
+        Rectangle {
+            vertical-stretch: 1;
+            background: RackTheme.module-bg;
+            border-width: 1px;
+            border-color: RackTheme.border-metal;
+            border-radius: RackTheme.panel-radius;
+
+            VerticalLayout {
+                padding: 14px;
+                spacing: 10px;
+
+                RackSelect {
+                    model: root.adapter-names;
+                    current-index: root.selected-adapter;
+                    empty-text: root.t-no-adapter;
+                    enabled: !root.busy && root.has-adapters;
+                    opened => {
+                        root.adapter-menu-open = true;
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 8px;
+                    padding-left: 11px;
+
+                    Text {
+                        text: root.status-main;
+                        font-size: 16px;
+                        font-weight: 600;
+                        font-family: "Consolas";
+                        color: RackTheme.ink-primary;
+                        vertical-alignment: center;
+                    }
+
+                    Rectangle { }
+                }
+
+                // Interrupteur transversal : retour aux réglages par défaut
+                DhcpSwitch {
+                    active: root.dhcp-mode;
+                    enabled: !root.busy && root.has-adapters;
+                    tooltip: root.t-dhcp-tip;
+                    toggled(enabled) => {
+                        root.toggle-dhcp(enabled);
+                    }
+                }
+
+                Divider { }
+
+                VerticalLayout {
+                    spacing: 3px;
+
+                    HorizontalLayout {
+                        padding-left: 11px;
+
+                        SectionTitle {
+                            text: root.t-address;
+                        }
+                    }
+
+                    HorizontalLayout {
+                        spacing: 8px;
+
+                        RackField {
+                            placeholder: "192.168.2.10/24";
+                            text <=> root.ip-input;
+                            enabled: !root.busy && root.has-adapters;
+                            accepted => {
+                                root.apply();
+                            }
+                        }
+
+                        RackButton {
+                            text: root.t-apply;
+                            primary: true;
+                            min-width: 104px;
+                            max-width: 104px;
+                            enabled: !root.busy && root.has-adapters;
+                            clicked => {
+                                root.apply();
+                            }
+                        }
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: 10px;
+
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        spacing: 2px;
+
+                        HorizontalLayout {
+                            padding-left: 11px;
+
+                            SectionTitle {
+                                text: root.t-gateway-label;
+                            }
+                        }
+
+                        RackField {
+                            placeholder: root.t-gateway;
+                            text <=> root.gateway-input;
+                            enabled: !root.busy && root.has-adapters;
+                            accepted => {
+                                root.apply();
+                            }
+                        }
+                    }
+
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        spacing: 2px;
+
+                        HorizontalLayout {
+                            padding-left: 11px;
+
+                            SectionTitle {
+                                text: root.t-dns-label;
+                            }
+                        }
+
+                        RackField {
+                            placeholder: root.t-dns-placeholder;
+                            text <=> root.dns-input;
+                            enabled: !root.busy && root.has-adapters;
+                            accepted => {
+                                root.apply();
+                            }
+                        }
+                    }
+                }
+
+                Divider { }
+
+                HorizontalLayout {
+                    height: 28px;
+                    spacing: 8px;
+                    padding-left: 11px;
+                    padding-right: 11px;
+
+                    SectionTitle {
+                        text: root.t-virtual;
+                    }
+
+                    Rectangle { }
+
+                    RackButton {
+                        text: "+";
+                        min-width: 30px;
+                        max-width: 30px;
+                        height: 28px;
+                        label-size: 15px;
+                        tooltip: root.t-add-tip;
+                        enabled: !root.busy;
+                        clicked => {
+                            root.adding = !root.adding;
+                            if root.adding {
+                                root.add-input = "";
+                            }
+                        }
+                    }
+                }
+
+                if root.adding : HorizontalLayout {
+                    spacing: 8px;
+
+                    RackField {
+                        placeholder: "192.168.3.10/24";
+                        text <=> root.add-input;
+                        enabled: !root.busy;
+                        accepted => {
+                            root.add-alias(root.add-input);
+                        }
+                    }
+
+                    RackButton {
+                        text: root.t-add;
+                        primary: true;
+                        min-width: 92px;
+                        max-width: 92px;
+                        enabled: !root.busy;
+                        clicked => {
+                            root.add-alias(root.add-input);
+                        }
+                    }
+
+                    CenterV {
+                        GhostButton {
+                            text: "×";
+                            tooltip: root.t-cancel;
+                            enabled: !root.busy;
+                            clicked => {
+                                root.adding = false;
+                            }
+                        }
+                    }
+                }
+
+                // Liste des alias
+                Rectangle {
+                    vertical-stretch: 1;
+                    min-height: 90px;
+                    background: RackTheme.field-bg;
+                    border-width: 1px;
+                    border-color: RackTheme.border-metal;
+                    border-radius: RackTheme.control-radius;
+                    clip: true;
+
+                    if root.aliases.length == 0 : Text {
+                        text: root.t-no-aliases;
+                        font-size: 10px;
+                        letter-spacing: 1px;
+                        color: RackTheme.ink-silkscreen;
+                        opacity: 0.55;
+                        horizontal-alignment: center;
+                        vertical-alignment: center;
+                    }
+
+                    if root.aliases.length > 0 : Flickable {
+                        x: 1px;
+                        y: 1px;
+                        width: parent.width - 2px;
+                        height: parent.height - 2px;
+                        content-width: self.width;
+                        content-height: listLayout.preferred-height;
+                        interactive: true;
+
+                        listLayout := VerticalLayout {
+                            width: parent.content-width;
+                            spacing: 2px;
+
+                            for row in root.aliases : HorizontalLayout {
+                                height: 38px;
+                                padding-left: 9px;
+                                padding-right: 10px;
+                                spacing: 8px;
+
+                                Text {
+                                    text: row.cidr;
+                                    font-size: 13px;
+                                    font-family: "Consolas";
+                                    color: row.enabled ? RackTheme.ink-primary : RackTheme.ink-silkscreen;
+                                    vertical-alignment: center;
+                                }
+
+                                Rectangle { }
+
+                                CenterV {
+                                    GhostButton {
+                                        text: "×";
+                                        tooltip: root.t-remove-tip;
+                                        enabled: !row.busy && !root.busy;
+                                        clicked => {
+                                            root.remove-alias(row.id);
+                                        }
+                                    }
+                                }
+
+                                CenterV {
+                                    RackSwitch {
+                                        checked: row.enabled;
+                                        tooltip: root.t-toggle-tip;
+                                        enabled: !row.busy && !root.busy;
+                                        toggled => {
+                                            root.toggle-alias(row.id, self.checked);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Divider { }
+
+                HorizontalLayout {
+                    spacing: 10px;
+                    padding-left: 11px;
+
+                    Text {
+                        text: root.message;
+                        font-size: 11px;
+                        color: root.message-error ? RackTheme.led-rec : RackTheme.ink-silkscreen;
+                        vertical-alignment: center;
+                        wrap: word-wrap;
+                        vertical-stretch: 1;
+                    }
+
+                    CenterV {
+                        RackButton {
+                            text: root.t-quit;
+                            min-width: 82px;
+                            max-width: 82px;
+                            height: 28px;
+                            label-size: 10px;
+                            enabled: !root.busy;
+                            clicked => {
+                                root.quit();
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Panneau de sélection d'adaptateur (overlay, évite de décaler la mise en page)
+            if root.adapter-menu-open : Rectangle {
+                x: 0;
+                y: 0;
+                width: parent.width;
+                height: parent.height;
+                background: RackTheme.dark ? #00000066 : #00000038;
+                border-radius: RackTheme.panel-radius;
+
+                closeArea := TouchArea {
+                    width: parent.width;
+                    height: parent.height;
+                    clicked => {
+                        root.adapter-menu-open = false;
+                    }
+                }
+
+                Rectangle {
+                    x: 14px;
+                    y: 14px;
+                    width: parent.width - 28px;
+                    height: root.adapter-names.length * 34px + 10px;
+                    background: RackTheme.module-bg;
+                    border-width: 1px;
+                    border-color: RackTheme.border-metal;
+                    border-radius: RackTheme.control-radius;
+                    clip: true;
+
+                    VerticalLayout {
+                        padding: 5px;
+                        spacing: 2px;
+
+                        for name[index] in root.adapter-names : Rectangle {
+                            height: 32px;
+                            border-radius: 2px;
+                            background: pickTa.has-hover ? RackTheme.field-bg : transparent;
+
+                            Text {
+                                x: 10px;
+                                width: parent.width - 20px;
+                                height: parent.height;
+                                text: name;
+                                font-size: 12px;
+                                color: index == root.selected-adapter ? RackTheme.jack-gold : RackTheme.ink-primary;
+                                vertical-alignment: center;
+                            }
+
+                            pickTa := TouchArea {
+                                clicked => {
+                                    root.adapter-menu-open = false;
+                                    root.select-adapter(name);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Panneau d'installation
+    if root.installer-open : Rectangle {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        background: #000000A0;
+
+        TouchArea {
+            width: parent.width;
+            height: parent.height;
+            clicked => {
+                root.close-installer();
+            }
+        }
+
+        Rectangle {
+            x: 24px;
+            y: (parent.height - 330px) / 2;
+            width: parent.width - 48px;
+            height: 330px;
+            background: RackTheme.module-bg;
+            border-width: 1px;
+            border-color: RackTheme.border-metal;
+            border-radius: RackTheme.panel-radius;
+
+            VerticalLayout {
+                padding: 20px;
+                spacing: 12px;
+
+                Text {
+                    text: root.t-install-title;
+                    font-size: 11px;
+                    font-weight: 600;
+                    letter-spacing: 1.4px;
+                    color: RackTheme.jack-gold;
+                }
+
+                Text {
+                    text: root.t-install-dest + " " + root.install-dir;
+                    font-size: 10px;
+                    font-family: "Consolas";
+                    color: RackTheme.ink-silkscreen;
+                    wrap: word-wrap;
+                }
+
+                Divider { }
+
+                HorizontalLayout {
+                    spacing: 8px;
+
+                    Text {
+                        text: root.t-install-autostart;
+                        font-size: 11px;
+                        color: RackTheme.ink-primary;
+                        vertical-alignment: center;
+                    }
+
+                    Rectangle { }
+
+                    CenterV {
+                        RackSwitch {
+                            checked: root.autostart;
+                            tooltip: root.t-autostart-tip;
+                            toggled => {
+                                root.autostart = self.checked;
+                            }
+                        }
+                    }
+                }
+
+                Text {
+                    text: root.t-install-autostart-hint;
+                    font-size: 10px;
+                    color: RackTheme.ink-muted;
+                    wrap: word-wrap;
+                }
+
+                if root.installer-message != "" : Text {
+                    text: root.installer-message;
+                    font-size: 11px;
+                    color: root.installer-error ? RackTheme.led-rec : RackTheme.ink-silkscreen;
+                    wrap: word-wrap;
+                }
+
+                Rectangle {
+                    vertical-stretch: 1;
+                }
+
+                RackButton {
+                    text: root.installed ? root.t-reinstall : root.t-install-button;
+                    primary: true;
+                    height: 40px;
+                    clicked => {
+                        root.install(root.autostart);
+                    }
+                }
+
+                RackButton {
+                    text: root.t-cancel;
+                    height: 32px;
+                    clicked => {
+                        root.close-installer();
+                    }
+                }
+            }
+        }
+    }
+
+    // Interface verrouillée si l'application n'est pas élevée
+    if !root.admin : Rectangle {
+        x: 0;
+        y: 0;
+        width: parent.width;
+        height: parent.height;
+        background: #000000A0;
+
+        TouchArea {
+            width: parent.width;
+            height: parent.height;
+        }
+
+        Rectangle {
+            x: 24px;
+            y: (parent.height - 272px) / 2;
+            width: parent.width - 48px;
+            height: 272px;
+            background: RackTheme.module-bg;
+            border-width: 1px;
+            border-color: RackTheme.jack-gold;
+            border-radius: RackTheme.panel-radius;
+
+            VerticalLayout {
+                padding: 20px;
+                spacing: 12px;
+
+                Text {
+                    text: root.t-lock-title;
+                    font-size: 11px;
+                    font-weight: 600;
+                    letter-spacing: 1.4px;
+                    color: RackTheme.jack-gold;
+                }
+
+                Text {
+                    text: root.t-lock-body;
+                    font-size: 12px;
+                    color: RackTheme.ink-primary;
+                    wrap: word-wrap;
+                }
+
+                if root.elevation-error != "" : Text {
+                    text: root.elevation-error;
+                    font-size: 11px;
+                    color: RackTheme.led-rec;
+                    wrap: word-wrap;
+                }
+
+                Rectangle {
+                    vertical-stretch: 1;
+                }
+
+                RackButton {
+                    text: root.t-elevate;
+                    primary: true;
+                    height: 42px;
+                    clicked => {
+                        root.elevate();
+                    }
+                }
+
+                RackButton {
+                    text: root.t-close;
+                    height: 32px;
+                    clicked => {
+                        root.close-app();
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component AppTray inherits SystemTrayIcon {
+    in property <image> tray-icon;
+    in property <string> tip: "FastIpSwitch";
+    in property <string> menu-show: "Afficher FastIpSwitch";
+    in property <string> menu-dhcp: "Revenir en DHCP";
+    in property <string> menu-quit: "Quitter";
+
+    callback show-window();
+    callback restore-dhcp();
+    callback quit();
+    callback activate();
+
+    icon: root.tray-icon;
+    tooltip: root.tip;
+
+    clicked => {
+        root.activate();
+    }
+
+    Menu {
+        MenuItem {
+            title: root.menu-show;
+            activated => {
+                root.show-window();
+            }
+        }
+        MenuItem {
+            title: root.menu-dhcp;
+            activated => {
+                root.restore-dhcp();
+            }
+        }
+        MenuSeparator { }
+        MenuItem {
+            title: root.menu-quit;
+            activated => {
+                root.quit();
+            }
+        }
+    }
+}
