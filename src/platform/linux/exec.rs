@@ -5,12 +5,8 @@ use std::process::{Command, Stdio};
 
 use crate::log;
 
-/// Exécute une commande sans passer par un shell et journalise l'appel.
-pub fn run(program: &str, args: &[&str]) -> Result<String, String> {
-    run_inner(program, args, true)
-}
-
-/// Variante silencieuse (sondages fréquents : thème, état).
+/// Exécute une commande sans passer par un shell, sans journaliser l'appel
+/// (les lectures sont refaites toutes les 2 s).
 pub fn run_quiet(program: &str, args: &[&str]) -> Result<String, String> {
     run_inner(program, args, false)
 }
