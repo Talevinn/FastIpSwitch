@@ -1,7 +1,9 @@
 # Packaging Linux (.deb) — FastIpSwitch
 
 Paquet Debian pour Debian, Ubuntu et Linux Mint. Les chemins installés sont
-ceux attendus par le code Rust :
+ceux attendus par le code Rust. Pour l'architecture, les commandes réseau et le
+dépannage, voir le guide [`docs/linux.fr.md`](../docs/linux.fr.md)
+([English](../docs/linux.md)).
 
 | Élément | Chemin installé |
 |---|---|
@@ -24,8 +26,8 @@ fournie dans `packaging/polkit/`.
 - `dpkg-deb` (paquet `dpkg-dev` sur Debian/Ubuntu) ;
 - `gzip` ;
 - outils de compilation Slint : `pkg-config`, en-têtes fontconfig/freetype,
-  X11/Wayland (`libxkbcommon-dev`, `libwayland-dev`, `libx11-xcb-dev`,
-  `libegl1-mesa-dev`) ;
+  X11/Wayland (`libxkbcommon-dev`, `libwayland-dev`, `libegl1-mesa-dev`,
+  `libgl1-mesa-dev`, et `libx11-xcb-dev` pour X11) ;
 - facultatif, pour la validation automatique :
   `desktop-file-utils` (`desktop-file-validate`) et `appstream`
   (`appstreamcli`).
@@ -34,10 +36,13 @@ Sous Debian/Ubuntu :
 
 ```sh
 sudo apt install build-essential pkg-config dpkg-dev gzip \
-    libfontconfig1-dev libfreetype6-dev libxkbcommon-dev \
-    libwayland-dev libx11-xcb-dev libegl1-mesa-dev \
+    libfontconfig1-dev libfreetype-dev libxkbcommon-dev \
+    libwayland-dev libx11-xcb-dev libegl1-mesa-dev libgl1-mesa-dev \
     desktop-file-utils appstream
 ```
+
+`libfreetype-dev` existe sur Debian 12+ et Ubuntu 24.04 ; sur les versions plus
+anciennes, utiliser `libfreetype6-dev`.
 
 ## Construction
 
@@ -122,7 +127,9 @@ Justifications :
   virtuelles fonctionnent avec `ip` seul et certaines installations utilisent
   `systemd-networkd`. `apt` installe les `Recommends` par défaut, donc `nmcli`
   est présent sur Ubuntu/Mint standard. Sans NetworkManager, l'adresse
-  principale et les DNS (via `nmcli`) ne sont pas modifiables.
+  principale et la passerelle passent par `ip` (changements volatils, non
+  persistés) et les DNS par `resolvectl` (systemd-resolved) ; sans `resolvectl`,
+  seuls la lecture et les alias restent disponibles.
 - **pkexec | policykit-1** : l'élévation passe par `pkexec`. Depuis Debian 12
   et Ubuntu 24.04, `/usr/bin/pkexec` est dans le paquet `pkexec` et non dans
   `polkitd` ; dépendre de `polkitd` seul laisserait l'application sans moyen
@@ -134,8 +141,8 @@ Justifications :
 
 - **polkit obligatoire** : sans policy installée (ou sans `pkexec`), la GUI
   démarre mais toute modification réseau échoue avec un message d'erreur.
-  La policy est fournie par `packaging/polkit/` (autre lot) ; le script refuse
-  de construire sans elle sauf `ALLOW_MISSING_POLKIT=1`.
+  La policy est fournie par `packaging/polkit/` et installée par le paquet ;
+  le script refuse de construire sans elle sauf `ALLOW_MISSING_POLKIT=1`.
 - **AppImage** : non traité ici. Une AppImage embarque le binaire mais pas la
   policy polkit ni le helper dans `/usr/libexec` ; il faudrait installer la
   policy séparément (ou embarquer un lanceur qui l'installe), ce qui dépasse
