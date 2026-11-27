@@ -23,8 +23,9 @@ fournie dans `packaging/polkit/`.
 ## Prérequis de build
 
 - Rust stable récent (≥ 1.88, édition 2024) et `cargo` ;
-- `dpkg-deb` (paquet `dpkg-dev` sur Debian/Ubuntu) ;
+- `dpkg-deb` récent (paquet `dpkg-dev` sur Debian/Ubuntu), avec prise en charge de `--root-owner-group` — **obligatoire** : le script s'arrête si l'option manque ;
 - `gzip` ;
+- `xmllint` (paquet `libxml2-utils`), facultatif : valide le XML de la policy polkit quand il est présent ; le chemin du helper est toujours vérifié ;
 - outils de compilation Slint : `pkg-config`, en-têtes fontconfig/freetype,
   X11/Wayland (`libxkbcommon-dev`, `libwayland-dev`, `libegl1-mesa-dev`,
   `libgl1-mesa-dev`, et `libx11-xcb-dev` pour X11) ;
@@ -35,7 +36,7 @@ fournie dans `packaging/polkit/`.
 Sous Debian/Ubuntu :
 
 ```sh
-sudo apt install build-essential pkg-config dpkg-dev gzip \
+sudo apt install build-essential pkg-config dpkg-dev gzip libxml2-utils \
     libfontconfig1-dev libfreetype-dev libxkbcommon-dev \
     libwayland-dev libx11-xcb-dev libegl1-mesa-dev libgl1-mesa-dev \
     desktop-file-utils appstream
@@ -56,8 +57,9 @@ Le script :
 
 1. lit la version dans `Cargo.toml` (surchargeable avec `VERSION=`) ;
 2. lance `cargo build --release --bin fastipswitch --bin fastipswitch-helper` ;
-3. assemble l'arborescence dans `packaging/.build/stage/` (ignorée par git) ;
-4. produit `packaging/.build/dist/fastipswitch_<version>_<arch>.deb`.
+3. valide la policy polkit : chemin `/usr/libexec/fastipswitch/fastipswitch-helper` toujours, XML via `xmllint` s'il est installé ;
+4. assemble l'arborescence dans `packaging/.build/stage/` (ignorée par git) et exige `dpkg-deb --root-owner-group` ;
+5. produit `packaging/.build/dist/fastipswitch_<version>_<arch>.deb`.
 
 Variables utiles :
 
@@ -67,7 +69,7 @@ Variables utiles :
 | `VERSION=x.y.z` | force la version du paquet |
 | `ARCH=arm64` | force l'architecture (défaut : `dpkg --print-architecture`) |
 | `DIST_DIR=/tmp/out` | répertoire de sortie du `.deb` |
-| `SKIP_VALIDATE=1` | ignore `desktop-file-validate` / `appstreamcli` |
+| `SKIP_VALIDATE=1` | ignore `desktop-file-validate` / `appstreamcli` (pas les contrôles polkit) |
 | `ALLOW_MISSING_POLKIT=1` | construit sans la policy polkit (paquet de test, élévation cassée) |
 | `POLKIT_POLICY=…` | policy à installer (défaut : `packaging/polkit/`) |
 | `CARGO_TARGET_DIR=…` | respecté, comme pour `cargo` |
@@ -94,6 +96,8 @@ dpkg-deb --contents packaging/.build/dist/fastipswitch_0.1.0_amd64.deb | grep li
 
 Attendu : helper en `-rwxr-xr-x root/root`, policy en `0644 root/root`,
 binaire GUI en `/usr/bin/fastipswitch`, icônes dans les huit tailles.
+Le `postinst` réapplique `root:root` et `0755` au helper après installation
+(défense en profondeur : il est exécuté en root par `pkexec`).
 
 ## Installation et désinstallation
 
@@ -115,8 +119,9 @@ Pour repartir de zéro, les supprimer manuellement.
 ## Dépendances runtime retenues
 
 - `Depends` : `libc6`, `libgcc-s1`, `libfontconfig1`, `libfreetype6`,
-  `libxkbcommon0`, `libwayland-client0 | libx11-6`, `libegl1 | libgl1`,
-  `iproute2`, `pkexec | policykit-1`.
+  `libxkbcommon0`, `libxkbcommon-x11-0`, `libx11-6`, `libx11-xcb1`,
+  `libxcursor1`, `libxi6`, `libxrandr2`, `libwayland-client0`,
+  `libegl1 | libgl1`, `iproute2`, `pkexec | policykit-1`.
 - `Recommends` : `network-manager`.
 
 Justifications :
@@ -127,22 +132,39 @@ Justifications :
   virtuelles fonctionnent avec `ip` seul et certaines installations utilisent
   `systemd-networkd`. `apt` installe les `Recommends` par défaut, donc `nmcli`
   est présent sur Ubuntu/Mint standard. Sans NetworkManager, l'adresse
-  principale et la passerelle passent par `ip` (changements volatils, non
-  persistés) et les DNS par `resolvectl` (systemd-resolved) ; sans `resolvectl`,
-  seuls la lecture et les alias restent disponibles.
+  statique passe par `ip` avec sauvegarde/restauration (changements volatils,
+  non persistés) et le DNS par `resolvectl` (systemd-resolved) ; le retour DHCP
+  exige `networkctl`, sinon il est refusé sans modification. Si NetworkManager
+  tourne mais ne gère pas l'interface, l'adresse statique et le retour DHCP
+  sont refusés.
 - **pkexec | policykit-1** : l'élévation passe par `pkexec`. Depuis Debian 12
   et Ubuntu 24.04, `/usr/bin/pkexec` est dans le paquet `pkexec` et non dans
   `polkitd` ; dépendre de `polkitd` seul laisserait l'application sans moyen
   d'élévation. `policykit-1` couvre Debian 11 / Ubuntu 22.04.
-- Les bibliothèques graphiques correspondent au backend Slint winit +
-  femtovg (Wayland ou X11, EGL ou GL).
+- **Bibliothèques X11/Wayland** : Slint winit + femtovg peut charger X11 ou
+  Wayland selon la session ; les deux jeux de bibliothèques clientes sont donc
+  déclarés (dont `libxkbcommon-x11-0`, `libx11-xcb1`, `libxcursor1`, `libxi6`,
+  `libxrandr2`), avec EGL ou GL.
 
 ## Limites connues
 
 - **polkit obligatoire** : sans policy installée (ou sans `pkexec`), la GUI
   démarre mais toute modification réseau échoue avec un message d'erreur.
   La policy est fournie par `packaging/polkit/` et installée par le paquet ;
-  le script refuse de construire sans elle sauf `ALLOW_MISSING_POLKIT=1`.
+  le script la valide (chemin du helper, XML si `xmllint` est présent) et
+  refuse de construire sans elle sauf `ALLOW_MISSING_POLKIT=1`.
+  La policy restreint l'élévation à la session locale active
+  (`allow_any=no`, `allow_inactive=no`, `allow_active=auth_admin_keep`) :
+  aucun prompt depuis SSH ou une session inactive ; le keep dure environ
+  cinq minutes pour le processus appelant.
+- **`--root-owner-group` obligatoire** : sans cette option, le helper pourrait
+  appartenir à l'UID du build et être remplacé par un utilisateur local avant
+  d'être exécuté en root. Le script s'arrête si `dpkg-deb` ne la prend pas en
+  charge ; le `postinst` réapplique aussi `root:root` + `0755`.
+- **Réseau sans NetworkManager** : l'adresse statique est un instantané `ip`
+  volatil (restauré en cas d'échec) ; le retour DHCP exige `networkctl` et est
+  refusé avant modification sans lui. Si NM tourne mais ne gère pas l'interface,
+  l'adresse statique et le retour DHCP sont refusés.
 - **AppImage** : non traité ici. Une AppImage embarque le binaire mais pas la
   policy polkit ni le helper dans `/usr/libexec` ; il faudrait installer la
   policy séparément (ou embarquer un lanceur qui l'installe), ce qui dépasse
@@ -165,7 +187,7 @@ packaging/
 ├── deb/
 │   ├── DEBIAN/
 │   │   ├── control              # modèle (substitutions @VERSION@, @ARCH@, @INSTALLED_SIZE@)
-│   │   ├── postinst             # caches menu/icônes
+│   │   ├── postinst             # chown/chmod du helper, caches menu/icônes
 │   │   ├── prerm                # ne touche pas à la config utilisateur
 │   │   └── postrm               # rafraîchit les caches au retrait
 │   ├── org.talevinn.fastipswitch.desktop
