@@ -283,6 +283,10 @@ La GUI tourne sans privilèges et n'obtient jamais root elle-même ; il n'y a pa
 - [État multiplateforme](docs/cross-platform.fr.md) — ce qui est commun, ce qui est spécifique, état de macOS.
 - [Notes de packaging](packaging/README.md) — contenu du `.deb`, variables de build, dépendances d'exécution.
 
+### Développement
+
+Une partie du code peut avoir été générée avec une IA ; elle est relue, testée et validée par le mainteneur. Voir AGENTS.md et CONVENTIONS.md pour les règles appliquées au dépôt.
+
 ## Licence
 
 GPL-3.0-or-later — voir `LICENSE` et `NOTICE`.
