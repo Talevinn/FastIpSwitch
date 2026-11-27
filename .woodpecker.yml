@@ -1,6 +1,14 @@
 # Intégration continue Codeberg (Woodpecker).
 # Le backend Windows n'est pas couvert ici : Rust + Slint se compilent sur
 # l'image Linux, mais les API IpHelper/netsh nécessitent une machine Windows.
+#
+# Paquets apt requis par Slint (winit/femtovg) : fontconfig + freetype pour le
+# rendu du texte, xkbcommon + wayland pour la saisie et la plateforme Wayland,
+# EGL + GL (Mesa) pour le renderer femtovg. `pkg-config` sert à la détection.
+#
+# Les tests d'intégration (`tests/cli.rs`, `tests/helper_cli.rs`) n'ouvrent
+# aucune fenêtre, ne demandent ni root ni réseau et n'exécutent aucune
+# commande de modification : ils tournent donc tels quels dans ce conteneur.
 
 when:
   event: [push, pull_request]
@@ -8,9 +16,12 @@ when:
 steps:
   test-linux:
     image: rust:1.99-bookworm
+    environment:
+      DEBIAN_FRONTEND: noninteractive
+      CARGO_TERM_COLOR: always
     commands:
       - apt-get update
       - apt-get install -y --no-install-recommends pkg-config libfontconfig1-dev libfreetype-dev libxkbcommon-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev
       - cargo fmt --check
-      - cargo test --all-targets
-      - cargo build --release
+      - cargo test --all-targets --locked
+      - cargo build --release --locked
