@@ -1,0 +1,41 @@
+# Modèle du fichier control d'un paquet binaire Debian.
+# Ne pas livrer tel quel : packaging/build-deb.sh remplace @VERSION@,
+# @ARCH@ et @INSTALLED_SIZE@ puis supprime les lignes commençant par « # ».
+#
+# Choix des dépendances :
+#   * iproute2 est indispensable : le backend lit la configuration via `ip -j`
+#     et manipule les adresses avec `ip addr`.
+#   * network-manager est en Recommends et non en Depends : les IP virtuelles
+#     (alias) fonctionnent avec `ip` seul, et certaines installations de
+#     bureau utilisent systemd-networkd ; apt installe de toute façon les
+#     Recommends par défaut, donc nmcli est présent sur Ubuntu/Mint standard.
+#     Sans NetworkManager, seules la lecture et les alias restent disponibles
+#     (l'adresse principale et les DNS passent par nmcli).
+#   * pkexec | policykit-1 : la GUI lance le helper via pkexec (polkit).
+#     Depuis Debian 12 / Ubuntu 24.04, /usr/bin/pkexec est fourni par le
+#     paquet `pkexec` et non par `polkitd` ; dépendre de polkitd seul
+#     laisserait l'application sans moyen d'élévation. policykit-1 couvre les
+#     distributions plus anciennes (Ubuntu 22.04, Debian 11).
+#   * libgcc-s1 apparaît dans `ldd` des deux binaires Rust (dérouleur GCC).
+#   * Les bibliothèques graphiques correspondent au backend Slint winit +
+#     femtovg : wayland ou X11, EGL ou GL selon la session.
+Package: fastipswitch
+Version: @VERSION@
+Section: net
+Priority: optional
+Architecture: @ARCH@
+Maintainer: Valentin PICARD <developpeur@talevinn.fr>
+Installed-Size: @INSTALLED_SIZE@
+Depends: libc6, libgcc-s1, libfontconfig1, libfreetype6, libxkbcommon0, libwayland-client0 | libx11-6, libegl1 | libgl1, iproute2, pkexec | policykit-1
+Recommends: network-manager
+Suggests: hicolor-icon-theme
+Homepage: https://codeberg.org/Talevinn/FastIpSwitch
+Description: fast IPv4 address switcher and virtual IP manager
+ FastIpSwitch switches the IPv4 configuration of a network interface between
+ DHCP and a static address, and adds temporary virtual IP addresses (aliases)
+ without dropping DHCP.
+ .
+ Changes are applied through a small privileged helper launched with pkexec
+ and restricted by a polkit action; the graphical application itself runs
+ unprivileged. The interface is built with Slint, follows the desktop light or
+ dark theme and is available in English and French.

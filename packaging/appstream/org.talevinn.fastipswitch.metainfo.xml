@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>org.talevinn.fastipswitch</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <name>FastIpSwitch</name>
+  <summary>Switch IPv4 addresses and manage virtual IPs</summary>
+
+  <developer id="org.talevinn">
+    <name>Valentin PICARD</name>
+  </developer>
+
+  <description>
+    <p>
+      FastIpSwitch changes the IPv4 configuration of a network interface
+      between DHCP and a static address, and manages temporary virtual
+      addresses (aliases) on the same interface.
+    </p>
+    <ul>
+      <li>Read adapters and their current addresses at a glance.</li>
+      <li>Apply a static address, gateway and DNS servers in one action.</li>
+      <li>Add or remove virtual IPs without dropping DHCP.</li>
+      <li>Restore the initial configuration when the application quits.</li>
+      <li>Light and dark themes, English and French interface.</li>
+    </ul>
+    <p>
+      Network changes are performed by a small privileged helper launched
+      through pkexec and restricted by a polkit action, so the graphical
+      application itself runs unprivileged.
+    </p>
+  </description>
+
+  <launchable type="desktop-id">org.talevinn.fastipswitch.desktop</launchable>
+
+  <provides>
+    <binary>fastipswitch</binary>
+  </provides>
+
+  <categories>
+    <category>Network</category>
+    <category>Settings</category>
+  </categories>
+
+  <url type="homepage">https://codeberg.org/Talevinn/FastIpSwitch</url>
+  <url type="bugtracker">https://codeberg.org/Talevinn/FastIpSwitch/issues</url>
+
+  <content_rating type="oars-1.1"/>
+
+  <releases>
+    <release version="0.1.0" date="2026-11-27"/>
+  </releases>
+</component>

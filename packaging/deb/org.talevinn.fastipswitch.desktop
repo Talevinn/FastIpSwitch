@@ -1,0 +1,17 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=FastIpSwitch
+GenericName=IPv4 switcher
+GenericName[fr]=Commutateur IPv4
+Comment=Switch between DHCP and static IPv4 addresses and manage virtual IPs
+Comment[fr]=Basculer entre DHCP et IPv4 statique et gérer des adresses IP virtuelles
+Exec=/usr/bin/fastipswitch
+TryExec=/usr/bin/fastipswitch
+Icon=fastipswitch
+Terminal=false
+Categories=Network;Settings;
+Keywords=ip;ipv4;network;dhcp;static;alias;dns;
+Keywords[fr]=ip;ipv4;réseau;dhcp;statique;alias;dns;
+StartupNotify=true
+StartupWMClass=fastipswitch

@@ -1,0 +1,61 @@
+.\" SPDX-License-Identifier: GPL-3.0-or-later
+.\" Copyright (C) 2026 Valentin PICARD
+.TH FASTIPSWITCH 1 "27 novembre 2026" "FastIpSwitch 0.1.0" "Commandes utilisateur"
+.SH NOM
+fastipswitch \- basculer entre DHCP et IPv4 statique et gérer des IP virtuelles
+.SH SYNOPSIS
+.B fastipswitch
+.RI [ \-\-print\-adapters ]
+.RI [ \-\-elevate ]
+.SH DESCRIPTION
+.B FastIpSwitch
+est une application graphique (Slint) qui lit la configuration IPv4 des
+interfaces réseau, bascule une interface entre DHCP et adresse statique, et
+ajoute ou retire des adresses IP virtuelles (alias) sans couper DHCP.
+.PP
+L'application s'exécute sans privilèges. Chaque modification est transmise à
+.B /usr/libexec/fastipswitch/fastipswitch\-helper
+lancé via
+.BR pkexec (1)
+et restreint par l'action polkit
+.IR org.talevinn.fastipswitch .
+La configuration initiale est restaurée à la fermeture de l'application.
+.SH OPTIONS
+.TP
+.B \-\-print\-adapters
+Affiche les interfaces et leurs adresses sur la sortie standard, puis quitte.
+Utile pour le diagnostic et les scripts.
+.TP
+.B \-\-elevate
+Demande l'élévation (conservé pour compatibilité avec le portage Windows ;
+sans effet sous Linux, où l'élévation est faite à la demande).
+.SH FICHIERS
+.TP
+.I ~/.config/fastipswitch/
+Préférences, liste des IP virtuelles et configuration de secours.
+.TP
+.I ~/.local/state/fastipswitch/fastipswitch.log
+Journal de l'application (rotation à 1 Mo, un ancien journal conservé).
+.TP
+.I /usr/share/polkit-1/actions/org.talevinn.fastipswitch.policy
+Action polkit autorisant l'exécution du helper.
+.SH ENVIRONNEMENT
+.TP
+.B FASTIPSWITCH_LANG
+Force la langue : \fBfr\fR ou \fBen\fR.
+.TP
+.B FASTIPSWITCH_THEME
+Force le thème : \fBdark\fR ou \fBlight\fR.
+.TP
+.B FASTIPSWITCH_HELPER
+Chemin du helper (développement). Par défaut,
+\fI/usr/libexec/fastipswitch/fastipswitch\-helper\fR.
+.TP
+.B FASTIPSWITCH_DRY_RUN
+Si définie, journalise les requêtes sans exécuter de modification réseau.
+.SH VOIR AUSSI
+.BR ip (8),
+.BR nmcli (1),
+.BR pkexec (1)
+.PP
+Documentation du projet : https://codeberg.org/Talevinn/FastIpSwitch
