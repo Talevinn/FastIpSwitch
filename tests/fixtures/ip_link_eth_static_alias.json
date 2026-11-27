@@ -1,0 +1,28 @@
+[
+  {
+    "ifindex": 1,
+    "ifname": "lo",
+    "flags": ["LOOPBACK", "UP", "LOWER_UP"],
+    "mtu": 65536,
+    "qdisc": "noqueue",
+    "operstate": "UNKNOWN",
+    "group": "default",
+    "txqlen": 1000,
+    "link_type": "loopback",
+    "address": "00:00:00:00:00:00",
+    "broadcast": "00:00:00:00:00:00"
+  },
+  {
+    "ifindex": 3,
+    "ifname": "eth0",
+    "flags": ["BROADCAST", "MULTICAST", "UP", "LOWER_UP"],
+    "mtu": 1500,
+    "qdisc": "fq_codel",
+    "operstate": "UP",
+    "group": "default",
+    "txqlen": 1000,
+    "link_type": "ether",
+    "address": "b8:27:eb:4a:12:9f",
+    "broadcast": "ff:ff:ff:ff:ff:ff"
+  }
+]
