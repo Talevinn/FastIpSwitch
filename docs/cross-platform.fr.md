@@ -1,75 +1,84 @@
 [English](cross-platform.md) | **Français**
 
-# FastIpSwitch — évaluation multiplateforme
+# FastIpSwitch — état multiplateforme
 
-État : **V0.1 est Windows uniquement**. Ce document évalue ce qu'il faudrait pour Linux et macOS.
+État : **Windows et Linux sont implémentés**. Windows est inchangé (netsh, UAC, tâche planifiée). Linux est un premier portage (NetworkManager recommandé, repli `ip`, paquet `.deb`). **macOS n'est pas implémenté.**
 
-## Ce qui est conceptuellement portable
+- Guide utilisateur Linux : [linux.fr.md](linux.fr.md)
+- Résumé Linux dans le README : [README — Linux](../README.fr.md#linux)
 
-Dans l'état actuel, le code est couplé à Windows (`win`, `installer`, `store`, `i18n` via le registre et `GetUserDefaultUILanguage`). Ce qui est portable, ou le deviendra après extraction :
+## Architecture commune
 
-- L'interface **Slint** (fenêtre, thème, widgets, tray via `SystemTrayIcon`).
-- La logique applicative (profils CIDR, validation, liste d'alias, i18n FR/EN, session de récupération).
-- Le modèle « adresse principale + IP virtuelles » existe aussi sous Linux et macOS.
+L'ancien code spécifiquement Windows est désormais découpé derrière une façade commune :
 
-## Ce qui est spécifique à Windows
+- `src/platform/mod.rs` définit les types partagés (`AdapterInfo`, `IfaceId`, `IpEntry`, `AdapterRef`), le trait `NetworkBackend`, `backend()` et les fonctions système (admin/instance, élévation, chemins, installation, thème, boîtes de message).
+- `src/platform/windows/` conserve l'implémentation netsh/Win32.
+- `src/platform/linux/` fournit l'implémentation Linux (`read`, `ops`, `helper`, `exec`, `paths`, `installer`, `instance`, `theme`).
+- L'interface Slint, la validation CIDR, l'i18n et la session de récupération restent communes.
+- Toute autre cible échoue à la compilation avec `compile_error!("FastIpSwitch prend en charge Windows et Linux uniquement")`.
 
-| Domaine | Implémentation actuelle | Équivalent Linux | Équivalent macOS |
+## Correspondance des plateformes
+
+| Domaine | Windows (implémenté) | Linux (implémenté) | macOS (non implémenté) |
 |---|---|---|---|
-| Lire les interfaces | `GetIfTable2`, `GetUnicastIpAddressTable`, `GetAdaptersAddresses` | `getifaddrs`, rtnetlink, ou `nmcli` | `getifaddrs`, `networksetup -listallnetworkservices` |
-| Changer l'IP | `netsh interface ipv4 set address` | `ip addr` / `nmcli connection modify` | `networksetup -setmanual` / `-setdhcp` |
-| IP virtuelles | `netsh add address` + `dhcpstaticipcoexistence` | `ip addr add` (coexiste nativement avec DHCP) | `ifconfig <if> alias` (coexiste avec DHCP) |
-| Passerelle | `gateway=` de netsh | `ip route replace default via` / nmcli | `networksetup -setrouter` |
-| DNS | `netsh set dnsservers` | `resolvectl dns` / nmcli | `networksetup -setdnsservers` |
-| Élévation | manifeste `asInvoker` + `ShellExecuteW("runas")` (UAC) | `pkexec`, `sudo`, helper polkit | Authorization Services / `osascript ... with administrator privileges` |
-| Tray | `Shell_NotifyIcon` (via Slint) | StatusNotifierItem (extension GNOME requise) | `NSStatusItem` (via Slint) |
-| Installation | copie dans `%LOCALAPPDATA%\Programs` + raccourcis `.lnk` + `schtasks` | `.deb`, AppImage, `~/.local/bin`, `.desktop`, autostart XDG | `.app` + `.dmg`, `~/Applications`, LaunchAgent / `SMAppService` |
-| Données | `data/` à côté de l'exe, sinon `%APPDATA%`/`%LOCALAPPDATA%` | XDG (`~/.config`, `~/.local/share`) | `~/Library/Application Support` |
+| Lire les interfaces | `GetIfTable2`, `GetUnicastIpAddressTable`, `GetAdaptersAddresses` | `ip -j addr/link/route show`, `nmcli connection show --active`, `nmcli -g IP4.DNS device show` | `getifaddrs`, `networksetup -listallnetworkservices` |
+| Changer l'IP | `netsh interface ipv4 set address` (`store=active`) | `nmcli device modify` (configuration active seulement) ou `ip -4 addr flush/add` + route par défaut | `networksetup -setmanual` / `-setdhcp` |
+| IP virtuelles | `netsh add address` + `dhcpstaticipcoexistence` | `ip -4 addr add/del` (coexiste avec DHCP ; pas de bascule de coexistence) | `ifconfig <if> alias` |
+| Passerelle | `gateway=` de netsh | `ipv4.gateway` via nmcli, ou `ip route replace default via` | `networksetup -setrouter` |
+| DNS | `netsh set dnsservers` (persistant) | `nmcli ipv4.dns` + `ipv4.ignore-auto-dns`, ou `resolvectl dns` | `networksetup -setdnsservers` |
+| Élévation | manifeste `asInvoker` + `ShellExecuteW("runas")` (UAC) | GUI non privilégiée + helper `pkexec` + action polkit (`auth_admin_keep`) | Authorization Services / helper privilégié |
+| Tray | `Shell_NotifyIcon` via Slint | `system-tray` Slint (StatusNotifierItem) ; GNOME demande AppIndicator | `NSStatusItem` via Slint |
+| Installation | copie dans `%LOCALAPPDATA%\Programs`, raccourcis `.lnk`, `schtasks` | `.deb` (système) + installation par utilisateur optionnelle depuis l'UI (`~/.local/bin`, entrées XDG, autostart) | `.app` + `.dmg`, LaunchAgent / `SMAppService` |
+| Données | `data/` à côté de l'exe, sinon `%APPDATA%`/`%LOCALAPPDATA%` | XDG (`~/.config`, `~/.local/state`), `data/` portable si accessible en écriture | `~/Library/Application Support` |
+| Récupération de session | `session.toml` + nettoyage netsh ciblé | `session.toml` + retrait des alias, retour DHCP et DNS ; instance unique via `flock` | — |
 
 ## Linux
 
-Faisable, et même plus simple que Windows pour les alias : `ip addr add 192.168.3.10/24 dev eth0` ne coupe pas DHCP, et il n'y a pas d'équivalent `store=active` à gérer (ou via un profil NetworkManager temporaire). Points d'attention :
+Le backend Linux est implémenté, avec une requête JSON par opération privilégiée :
 
-- **Élévation** : passer par `pkexec` ou un helper polkit ; `sudo` en terminal n'est pas acceptable pour une app GUI.
-- **NetworkManager** : sur les distributions de bureau, les modifications doivent idéalement passer par `nmcli` pour être visibles/cohérentes dans l'UI système ; `ip addr` fonctionne mais n'est pas persisté (ce qui correspond bien au mode temporaire).
-- **Tray** : StatusNotifierItem ; GNOME demande l'extension AppIndicator.
-- **Packaging** : AppImage (portable, un seul fichier) + `.deb`, autostart via `~/.config/autostart/*.desktop`.
-- **Effort estimé** : 2 à 4 jours pour un backend `ip`/`nmcli`, l'élévation et le packaging AppImage, hors tests matériels.
+- **La lecture** est non privilégiée (`ip -j`, requêtes `nmcli`). Les échecs de `nmcli` sont tolérés ; ceux de `ip` sont fatals.
+- **Les écritures** sont déléguées à `fastipswitch-helper` via `pkexec`. Le helper revalide toute la requête (existence de l'interface, invariants du CIDR, passerelle, bornes DNS) et exécute des vecteurs d'arguments sans shell.
+- **Adresse principale / DNS / DHCP** passent par NetworkManager quand l'interface est `connected` ; sinon par `ip` (et `resolvectl` pour le DNS). Les changements NM utilisent `device modify`, c'est-à-dire la configuration active uniquement, ce qui correspond à l'intention `store=active` de Windows.
+- **Les alias** passent toujours par `ip -4 addr add/del` ; ils coexistent nativement avec DHCP.
+- **Policy** : `org.talevinn.fastipswitch.network` (`auth_admin` pour inactif/autre, `auth_admin_keep` pour la session active), avec `exec.path` fixé à `/usr/libexec/fastipswitch/fastipswitch-helper`.
+- **Packaging** : `packaging/build-deb.sh` produit un `.deb` (GUI, helper, policy, entrée de bureau, icônes, manuel, AppStream). Pas d'AppImage : le helper et la policy doivent être installés dans des chemins système.
+
+Limites connues : NetworkManager recommandé (pas d'intégration systemd-networkd complète), alias volatils si le profil NM est réappliqué, DNS via `resolvectl` seulement hors NM, tray GNOME avec extension AppIndicator, une seule instance, pas de routes statiques, pas d'IPv6, pas de dépôt signé. Détails : [linux.fr.md](linux.fr.md).
 
 ## macOS
 
-Le modèle « adresse principale + alias » fonctionne (`ifconfig en0 alias ...`), mais tout passe par des outils qui demandent les droits root (`networksetup`, `ifconfig`). Points d'attention :
+Non implémenté. Le modèle reste transposable (`ifconfig en0 alias ...`), mais tout passe par des outils qui exigent root (`networksetup`, `ifconfig`). Points ouverts, inchangés :
 
-- **Élévation** : `Authorization Services` ou un helper privilégié signé ; `osascript` est possible mais moins propre.
-- **Distribution** : `.app` + `.dmg`, signature Developer ID + notarisation Gatekeeper obligatoires pour éviter les avertissements.
+- **Élévation** : Authorization Services ou un helper privilégié signé ; `osascript` est possible mais moins propre.
+- **Distribution** : `.app` + `.dmg` ; signature Developer ID et notarisation Gatekeeper obligatoires pour éviter les avertissements.
 - **Autostart** : LaunchAgent ou `SMAppService` (macOS 13+).
 - **Tray** : `NSStatusItem` géré par Slint.
-- **Effort estimé** : 3 à 5 jours de développement, plus le compte Apple Developer et la notarisation.
 
-## Plan de refactorisation
+## Plan de refactorisation — réalisé et restant
 
-1. Introduire un trait `NetworkBackend` :
+1. **Trait `NetworkBackend` — réalisé.** Il est implémenté par `WindowsBackend` et `LinuxBackend`, avec une surface un peu plus large que l'esquisse initiale :
    ```rust
-   trait NetworkBackend {
-       fn adapters(&self) -> Result<Vec<AdapterInfo>>;
-       fn set_static(&self, iface: &Iface, cidr: Cidr, gw: Option<Ipv4Addr>, dns: &[Ipv4Addr]) -> Result<()>;
-       fn set_dhcp(&self, iface: &Iface) -> Result<()>;
-       fn add_alias(&self, iface: &Iface, cidr: Cidr) -> Result<()>;
-       fn remove_alias(&self, iface: &Iface, ip: Ipv4Addr) -> Result<()>;
-   }
+   fn read(&self) -> Result<Vec<AdapterInfo>, String>;
+   fn set_static(&self, id: &IfaceId, cidr: &Cidr, gateway: Option<Ipv4Addr>) -> Result<(), String>;
+   fn set_dhcp(&self, id: &IfaceId) -> Result<(), String>;
+   fn reset_dns_dhcp(&self, id: &IfaceId) -> Result<(), String>;
+   fn set_dns_static(&self, id: &IfaceId, servers: &[Ipv4Addr]) -> Result<(), String>;
+   fn add_address(&self, id: &IfaceId, cidr: &Cidr) -> Result<(), String>;
+   fn delete_address(&self, id: &IfaceId, cidr: &Cidr) -> Result<(), String>;
+   fn set_coexistence(&self, id: &IfaceId, enabled: bool) -> Result<(), String>;
    ```
-   avec `WindowsNetwork`, `LinuxNetwork`, `MacNetwork`.
-2. Isoler la plateforme dans `platform/` : chemins de données, élévation, installation, autostart, notifications.
-3. Garder l'UI Slint, l'i18n, la validation CIDR et la session communs.
-4. CI matrice (Windows, Ubuntu, macOS) + builds séparés.
-5. Packaging : MSI/exe Windows, AppImage/deb Linux, dmg macOS.
+   `set_coexistence` est spécifique à Windows et sans effet sous Linux.
+2. **Isolation de la plateforme — réalisée pour Linux** : chemins de données, élévation, installation, instance unique et thème vivent dans `src/platform/linux/` ; Windows conserve son module.
+3. **UI, i18n, validation et session communes — réalisé.**
+4. **CI — partielle** : Woodpecker lance `fmt`, les tests et un build release sous Linux (`rust:1.99-bookworm`). Pas de job Windows ni macOS, et le `.deb` n'est pas construit en CI.
+5. **Packaging — partiel** : `.deb` fait ; installateur Windows inchangé ; pas d'AppImage ni de `.dmg`.
 
-| Plateforme | Difficulté | Délai indicatif | Bloquants |
-|---|---|---|---|
-| Windows | fait | — | — |
-| Linux | moyenne | 2–4 j | polkit, NetworkManager, tray GNOME |
-| macOS | moyenne+ | 3–5 j | signature/notarisation Apple |
+| Plateforme | État | Bloquants restants |
+|---|---|---|
+| Windows | implémenté, inchangé | — |
+| Linux | implémenté (premier portage) | matrice de validation matérielle/bureau ; centré NetworkManager ; extension tray GNOME ; pas de dépôt signé |
+| macOS | non implémenté | helper privilégié, signature/notarisation, packaging, CI |
 
 ## Conclusion
 
-Le couple **Rust + Slint** est un bon choix pour porter l'UI sur Linux et macOS. Le travail réel est le **backend réseau** et l'**élévation**, pas l'interface.
+Le portage Linux valide la conception : le **backend réseau** et l'**élévation** étaient le vrai travail, tandis que l'UI Slint, la validation et la session sont restées communes. Le même découpage est le point de départ pour macOS ; le travail restant y est surtout la signature/notarisation et le helper privilégié.
