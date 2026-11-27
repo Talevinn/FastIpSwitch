@@ -1,0 +1,97 @@
+[
+  {
+    "ifindex": 5,
+    "ifname": "docker0",
+    "flags": ["BROADCAST", "MULTICAST", "UP", "LOWER_UP"],
+    "mtu": 1500,
+    "qdisc": "noqueue",
+    "operstate": "UP",
+    "group": "default",
+    "txqlen": 1000,
+    "link_type": "ether",
+    "address": "02:42:1a:2b:3c:4d",
+    "broadcast": "ff:ff:ff:ff:ff:ff",
+    "addr_info": [
+      {
+        "family": "inet",
+        "local": "172.17.0.1",
+        "prefixlen": 16,
+        "scope": "global",
+        "label": "docker0",
+        "valid_life_time": 4294967295,
+        "preferred_life_time": 4294967295
+      }
+    ]
+  },
+  {
+    "ifindex": 3,
+    "ifname": "eth0",
+    "flags": ["BROADCAST", "MULTICAST", "UP", "LOWER_UP"],
+    "mtu": 1500,
+    "qdisc": "fq_codel",
+    "operstate": "UP",
+    "group": "default",
+    "txqlen": 1000,
+    "link_type": "ether",
+    "address": "b8:27:eb:4a:12:9f",
+    "broadcast": "ff:ff:ff:ff:ff:ff",
+    "addr_info": [
+      {
+        "family": "inet",
+        "local": "192.168.1.18",
+        "prefixlen": 24,
+        "scope": "global",
+        "dynamic": true,
+        "label": "eth0",
+        "valid_life_time": 3600,
+        "preferred_life_time": 3600
+      }
+    ]
+  },
+  {
+    "ifindex": 10,
+    "ifname": "tun0",
+    "flags": ["POINTOPOINT", "NOARP", "UP", "LOWER_UP"],
+    "mtu": 1500,
+    "qdisc": "fq_codel",
+    "operstate": "UNKNOWN",
+    "group": "default",
+    "txqlen": 500,
+    "link_type": "none",
+    "address": "",
+    "addr_info": [
+      {
+        "family": "inet",
+        "local": "10.8.0.2",
+        "prefixlen": 24,
+        "scope": "global",
+        "label": "tun0",
+        "valid_life_time": 4294967295,
+        "preferred_life_time": 4294967295
+      }
+    ]
+  },
+  {
+    "ifindex": 11,
+    "ifname": "wg0",
+    "flags": ["POINTOPOINT", "NOARP", "UP", "LOWER_UP"],
+    "mtu": 1420,
+    "qdisc": "noqueue",
+    "operstate": "UNKNOWN",
+    "group": "default",
+    "txqlen": 1000,
+    "link_type": "none",
+    "address": "",
+    "addr_info": [
+      {
+        "family": "inet",
+        "local": "10.6.0.2",
+        "prefixlen": 32,
+        "scope": "global",
+        "label": "wg0",
+        "valid_life_time": 4294967295,
+        "preferred_life_time": 4294967295
+      }
+    ]
+  }
+]

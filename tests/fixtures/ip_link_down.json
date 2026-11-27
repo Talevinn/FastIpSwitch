@@ -1,0 +1,15 @@
+[
+  {
+    "ifindex": 4,
+    "ifname": "eth1",
+    "flags": ["BROADCAST", "MULTICAST"],
+    "mtu": 1500,
+    "qdisc": "fq_codel",
+    "operstate": "DOWN",
+    "group": "default",
+    "txqlen": 1000,
+    "link_type": "ether",
+    "address": "b8:27:eb:4a:12:a0",
+    "broadcast": "ff:ff:ff:ff:ff:ff"
+  }
+]

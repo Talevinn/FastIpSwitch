@@ -1,0 +1,92 @@
+[
+  {
+    "ifindex": 1,
+    "ifname": "lo",
+    "flags": ["LOOPBACK", "UP", "LOWER_UP"],
+    "mtu": 65536,
+    "qdisc": "noqueue",
+    "operstate": "UNKNOWN",
+    "group": "default",
+    "txqlen": 1000,
+    "link_type": "loopback",
+    "address": "00:00:00:00:00:00",
+    "broadcast": "00:00:00:00:00:00",
+    "addr_info": [
+      {
+        "family": "inet",
+        "local": "127.0.0.1",
+        "prefixlen": 8,
+        "scope": "host",
+        "label": "lo",
+        "valid_life_time": 4294967295,
+        "preferred_life_time": 4294967295
+      },
+      {
+        "family": "inet6",
+        "local": "::1",
+        "prefixlen": 128,
+        "scope": "host",
+        "noprefixroute": true,
+        "valid_life_time": 4294967295,
+        "preferred_life_time": 4294967295
+      }
+    ]
+  },
+  {
+    "ifindex": 2,
+    "ifname": "wlp3s0",
+    "flags": ["BROADCAST", "MULTICAST", "UP", "LOWER_UP"],
+    "mtu": 1500,
+    "qdisc": "fq_codel",
+    "operstate": "UP",
+    "group": "default",
+    "txqlen": 1000,
+    "link_type": "ether",
+    "address": "6c:40:08:b0:15:24",
+    "broadcast": "ff:ff:ff:ff:ff:ff",
+    "addr_info": [
+      {
+        "family": "inet",
+        "local": "192.168.1.18",
+        "prefixlen": 24,
+        "broadcast": "192.168.1.255",
+        "scope": "global",
+        "dynamic": true,
+        "noprefixroute": true,
+        "label": "wlp3s0",
+        "valid_life_time": 81473,
+        "preferred_life_time": 81473
+      },
+      {
+        "family": "inet6",
+        "local": "2a01:cb18:499:a600:e19f:1de1:5775:828",
+        "prefixlen": 64,
+        "scope": "global",
+        "temporary": true,
+        "dynamic": true,
+        "valid_life_time": 86392,
+        "preferred_life_time": 592
+      },
+      {
+        "family": "inet6",
+        "local": "2a01:cb18:499:a600:9f0e:a47e:8f46:e37c",
+        "prefixlen": 64,
+        "scope": "global",
+        "dynamic": true,
+        "mngtmpaddr": true,
+        "noprefixroute": true,
+        "valid_life_time": 86392,
+        "preferred_life_time": 592
+      },
+      {
+        "family": "inet6",
+        "local": "fe80::fbc6:eb5e:761:b3e7",
+        "prefixlen": 64,
+        "scope": "link",
+        "noprefixroute": true,
+        "valid_life_time": 4294967295,
+        "preferred_life_time": 4294967295
+      }
+    ]
+  }
+]
