@@ -72,14 +72,14 @@ Non implémenté. Le modèle reste transposable (`ifconfig en0 alias ...`), mais
    `set_coexistence` est spécifique à Windows et sans effet sous Linux.
 2. **Isolation de la plateforme — réalisée pour Linux** : chemins de données, élévation, installation, instance unique et thème vivent dans `src/platform/linux/` ; Windows conserve son module.
 3. **UI, i18n, validation et session communes — réalisé.**
-4. **CI — partielle** : Woodpecker lance `fmt`, les tests et un build release sous Linux (`rust:1.99-bookworm`, `--locked`). Pas de job Windows ni macOS, et le `.deb` n'est pas construit en CI.
+4. **Tests — en local uniquement** : `cargo fmt --check`, `cargo test --all-targets` et `cargo build --release` sont lancés sur la machine de développement ; Windows et macOS n'y sont pas compilés.
 5. **Packaging — partiel** : `.deb` fait ; installateur Windows inchangé ; pas d'AppImage ni de `.dmg`.
 
 | Plateforme | État | Bloquants restants |
 |---|---|---|
 | Windows | implémenté, backend/déroulé inchangés | — |
 | Linux | implémenté (premier portage, durci) | matrice de validation matérielle/bureau ; interfaces non gérées par NM refusées ; retour DHCP nécessitant networkd ; extension tray GNOME ; pas de dépôt signé |
-| macOS | non implémenté | helper privilégié, signature/notarisation, packaging, CI |
+| macOS | non implémenté | helper privilégié, signature/notarisation, packaging, tests locaux |
 
 ## Conclusion
 

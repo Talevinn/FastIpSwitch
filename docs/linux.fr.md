@@ -2,7 +2,7 @@
 
 # FastIpSwitch sous Linux
 
-État : **premier portage Linux**, durci après une revue de sécurité. La même interface Slint pilote un backend Linux fondé sur NetworkManager (`nmcli`) avec un repli `ip`/`resolvectl`. Le backend et le déroulé Windows sont inchangés. Le portage est couvert par des tests unitaires et un build CI ; aucune matrice de validation matérielle/bureau n'est publiée à ce jour.
+État : **premier portage Linux**, durci après une revue de sécurité. La même interface Slint pilote un backend Linux fondé sur NetworkManager (`nmcli`) avec un repli `ip`/`resolvectl`. Le backend et le déroulé Windows sont inchangés. Le portage est couvert par des tests unitaires et d'intégration exécutés en local ; aucune matrice de validation matérielle/bureau n'est publiée à ce jour.
 
 - Résumé utilisateur : [README — Linux](../README.fr.md#linux)
 - Vue multiplateforme : [cross-platform.fr.md](cross-platform.fr.md)
@@ -233,16 +233,17 @@ Il affiche la réponse JSON. Utilise une opération de restauration (`set_dhcp`,
 
 Les tests ne demandent pas root et ne modifient pas le réseau de la machine : ils exercent les analyseurs `ip -j`/`nmcli` avec des fixtures, le round-trip du protocole, la construction des arguments, les règles de validation, la résolution des chemins XDG, l'écriture de l'installeur dans des répertoires temporaires et le chemin dry-run debug. Les tests d'intégration `tests/cli.rs` (la GUI se termine proprement en mode `--print-adapters` sans ouvrir de fenêtre) et `tests/helper_cli.rs` (les requêtes invalides/interdites sont refusées avec une seule réponse JSON et aucune commande réseau) tournent aussi sans root.
 
-### CI
+### Lancer les tests en local
 
-Woodpecker (`.woodpecker.yml`) s'exécute sur push et pull request avec `rust:1.99-bookworm` :
+Toutes les vérifications se font sur la machine de développement :
 
-1. installation de `pkg-config libfontconfig1-dev libfreetype-dev libxkbcommon-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev` ;
-2. `cargo fmt --check` ;
-3. `cargo test --all-targets --locked` ;
-4. `cargo build --release --locked`.
+```sh
+cargo fmt --check
+cargo test --all-targets
+cargo build --release
+```
 
-Le backend Windows n'y est pas compilé (il exige les API Windows) ; il n'y a pas de job macOS. Le build du `.deb` n'est pas lancé en CI.
+Le backend Windows ne peut pas être compilé sous Linux (il exige les API Windows) ; il se vérifie sur une machine Windows. Le `.deb` se construit séparément avec `packaging/build-deb.sh`.
 
 ### Construire le `.deb`
 
@@ -270,7 +271,7 @@ Variables utiles : `SKIP_BUILD=1`, `VERSION=`, `ARCH=` (défaut `dpkg --print-ar
 - **Le nettoyage DNS est conditionnel** : `dns_set` n'est armé qu'après une application DNS réussie, donc un échec DNS à l'application n'efface pas la configuration DNS existante au Quitter.
 - **Détection du thème** fondée sur des outils de bureau (`gsettings`, `xfconf-query`, `kreadconfig5/6`) avec repli clair.
 - **Limites polkit** : `allow_any=no`, `allow_inactive=no`, `allow_active=auth_admin_keep`. L'élévation ne fonctionne que depuis la session locale active (aucun prompt SSH/inactive), l'autorisation est conservée environ cinq minutes pour le processus appelant, et le prompt est générique (sans interface/IP).
-- **Matrice de validation matérielle/bureau non publiée** : le portage est testé par des tests unitaires et d'intégration et la compilation CI, pas par une matrice automatisée de puces Wi-Fi/Ethernet et de bureaux.
+- **Matrice de validation matérielle/bureau non publiée** : le portage est testé par des tests unitaires et d'intégration exécutés en local, pas par une matrice automatisée de puces Wi-Fi/Ethernet et de bureaux.
 - Quelques textes d'interface hérités mentionnent encore Windows ou les droits administrateur ; sous Linux l'écran de verrouillage n'est jamais affiché (`is_admin()` vaut vrai et l'élévation est par action), donc ils ne sont pas atteignables en usage normal.
 
 ## Dépannage

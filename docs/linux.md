@@ -2,7 +2,7 @@
 
 # FastIpSwitch on Linux
 
-Status: **initial Linux port**, hardened after a security review. The same Slint UI drives a Linux backend built on NetworkManager (`nmcli`) with an `ip`/`resolvectl` fallback. The Windows backend and workflow are unchanged. The port is covered by unit tests and a CI build; a hardware/desktop validation matrix is not published yet.
+Status: **initial Linux port**, hardened after a security review. The same Slint UI drives a Linux backend built on NetworkManager (`nmcli`) with an `ip`/`resolvectl` fallback. The Windows backend and workflow are unchanged. The port is covered by unit and integration tests run locally; a hardware/desktop validation matrix is not published yet.
 
 - User-facing summary: [README — Linux](../README.md#linux)
 - Cross-platform layout: [cross-platform.md](cross-platform.md)
@@ -233,16 +233,17 @@ It prints the JSON response. Use a restore-only operation (`set_dhcp`, `remove_a
 
 Tests are unprivileged and do not modify the host network: they exercise the `ip -j`/`nmcli` parsers with fixtures, the protocol round-trip, argument construction, validation rules, XDG path resolution, installer writes into temporary directories, and the debug dry-run path. The integration tests in `tests/cli.rs` (the GUI exits cleanly in `--print-adapters` mode without opening a window) and `tests/helper_cli.rs` (invalid/forbidden requests are refused with a single JSON response and no network command) also run without root.
 
-### CI
+### Running the tests locally
 
-Woodpecker (`.woodpecker.yml`) runs on push and pull requests with `rust:1.99-bookworm`:
+All checks are run on the development machine:
 
-1. install `pkg-config libfontconfig1-dev libfreetype-dev libxkbcommon-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev`;
-2. `cargo fmt --check`;
-3. `cargo test --all-targets --locked`;
-4. `cargo build --release --locked`.
+```sh
+cargo fmt --check
+cargo test --all-targets
+cargo build --release
+```
 
-The Windows backend is not compiled there (it needs Windows APIs); there is no macOS job. The `.deb` build is not run in CI.
+The Windows backend cannot be compiled on Linux (it needs the Windows APIs); it is checked on a Windows machine. The `.deb` is built separately with `packaging/build-deb.sh`.
 
 ### Building the `.deb`
 
@@ -270,7 +271,7 @@ Useful variables: `SKIP_BUILD=1`, `VERSION=`, `ARCH=` (default `dpkg --print-arc
 - **DNS cleanup is conditional**: `dns_set` is armed only after a successful DNS application, so a DNS failure at Apply time does not erase the existing DNS configuration at Quit.
 - **Theme detection** relies on desktop tools (`gsettings`, `xfconf-query`, `kreadconfig5/6`) and falls back to light.
 - **Polkit limits**: `allow_any=no`, `allow_inactive=no`, `allow_active=auth_admin_keep`. Elevation works only from the local active session (no SSH/inactive prompt), the authorization is kept about five minutes for the calling process, and the prompt is generic (no interface/IP).
-- **Hardware/desktop validation matrix not published**: the port is tested by unit and integration tests and CI compilation, not by an automated matrix of Wi-Fi/Ethernet chipsets and desktops.
+- **Hardware/desktop validation matrix not published**: the port is tested by unit and integration tests run locally, not by an automated matrix of Wi-Fi/Ethernet chipsets and desktops.
 - Some inherited UI strings still mention Windows or administrator rights; on Linux the lock screen is never shown (`is_admin()` is true and elevation is per-action), so they are not reachable in normal use.
 
 ## Troubleshooting

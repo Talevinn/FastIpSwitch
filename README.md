@@ -149,7 +149,7 @@ Binary: `target\release\fastipswitch.exe`. `.cargo/config.toml` enables `+crt-st
 
 ## Linux
 
-The Linux port shares the same Slint UI and the same "primary address + virtual IPs" model. It is an initial port: covered by unit tests and a CI build, but without a published hardware/desktop test matrix. **The Windows backend and workflow are unchanged.** A detailed guide (architecture, command matrix, development, CI) is in [`docs/linux.md`](docs/linux.md).
+The Linux port shares the same Slint UI and the same "primary address + virtual IPs" model. It is an initial port: covered by unit and integration tests run locally, but without a published hardware/desktop test matrix. **The Windows backend and workflow are unchanged.** A detailed guide (architecture, command matrix, development, local tests) is in [`docs/linux.md`](docs/linux.md).
 
 NetworkManager is recommended: Debian, Ubuntu and Linux Mint desktop installs use it by default. The fallback depends on the exact state reported by NetworkManager:
 
@@ -279,7 +279,7 @@ The GUI runs unprivileged and never obtains root itself, and there is no greyed-
 
 ### See also
 
-- [Detailed Linux guide](docs/linux.md) — architecture, protocol, full command matrix, development and CI.
+- [Detailed Linux guide](docs/linux.md) — architecture, protocol, full command matrix, development and local tests.
 - [Cross-platform status](docs/cross-platform.md) — what is shared, what is platform-specific, macOS status.
 - [Packaging notes](packaging/README.md) — `.deb` contents, build variables, runtime dependencies.
 

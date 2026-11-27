@@ -149,7 +149,7 @@ Binaire : `target\release\fastipswitch.exe`. `.cargo/config.toml` active `+crt-s
 
 ## Linux
 
-Le portage Linux partage la même interface Slint et le même modèle « adresse principale + IP virtuelles ». C'est un premier portage : couvert par des tests unitaires et un build CI, mais sans matrice de validation matérielle/bureau publiée. **Le backend et le déroulé Windows sont inchangés.** Le guide détaillé (architecture, matrice des commandes, développement, CI) est dans [`docs/linux.fr.md`](docs/linux.fr.md).
+Le portage Linux partage la même interface Slint et le même modèle « adresse principale + IP virtuelles ». C'est un premier portage : couvert par des tests unitaires et d'intégration exécutés en local, mais sans matrice de validation matérielle/bureau publiée. **Le backend et le déroulé Windows sont inchangés.** Le guide détaillé (architecture, matrice des commandes, développement, tests locaux) est dans [`docs/linux.fr.md`](docs/linux.fr.md).
 
 NetworkManager est recommandé : les installations de bureau Debian, Ubuntu et Linux Mint l'utilisent par défaut. Le repli dépend de l'état exact rapporté par NetworkManager :
 
@@ -279,7 +279,7 @@ La GUI tourne sans privilèges et n'obtient jamais root elle-même ; il n'y a pa
 
 ### Voir aussi
 
-- [Guide Linux détaillé](docs/linux.fr.md) — architecture, protocole, matrice complète des commandes, développement et CI.
+- [Guide Linux détaillé](docs/linux.fr.md) — architecture, protocole, matrice complète des commandes, développement et tests locaux.
 - [État multiplateforme](docs/cross-platform.fr.md) — ce qui est commun, ce qui est spécifique, état de macOS.
 - [Notes de packaging](packaging/README.md) — contenu du `.deb`, variables de build, dépendances d'exécution.
 
