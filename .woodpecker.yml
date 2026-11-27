@@ -1,0 +1,16 @@
+# Intégration continue Codeberg (Woodpecker).
+# Le backend Windows n'est pas couvert ici : Rust + Slint se compilent sur
+# l'image Linux, mais les API IpHelper/netsh nécessitent une machine Windows.
+
+when:
+  event: [push, pull_request]
+
+steps:
+  test-linux:
+    image: rust:1.99-bookworm
+    commands:
+      - apt-get update
+      - apt-get install -y --no-install-recommends pkg-config libfontconfig1-dev libfreetype-dev libxkbcommon-dev libwayland-dev libegl1-mesa-dev libgl1-mesa-dev
+      - cargo fmt --check
+      - cargo test --all-targets
+      - cargo build --release

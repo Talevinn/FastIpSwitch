@@ -7,3 +7,5 @@
 *.tmp
 .idea/
 .vscode/
+/packaging/.build/
+*.deb
